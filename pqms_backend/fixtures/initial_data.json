@@ -1,0 +1,152 @@
+[
+  {
+    "model": "master.category",
+    "pk": 1,
+    "fields": {
+      "name": "外観",
+      "description": "外観検査"
+    }
+  },
+  {
+    "model": "master.category",
+    "pk": 2,
+    "fields": {
+      "name": "寸法",
+      "description": "寸法測定"
+    }
+  },
+  {
+    "model": "master.checkitem",
+    "pk": 1,
+    "fields": {
+      "name": "キズの有無",
+      "type": "boolean",
+      "category": 1,
+      "required": true
+    }
+  },
+  {
+    "model": "master.checkitem",
+    "pk": 2,
+    "fields": {
+      "name": "長さ (mm)",
+      "type": "number",
+      "unit": "mm",
+      "category": 2
+    }
+  },
+  {
+    "model": "master.checkitem",
+    "pk": 3,
+    "fields": {
+      "name": "判定",
+      "type": "select",
+      "options": [
+        "OK",
+        "NG",
+        "保留"
+      ],
+      "category": 1
+    }
+  },
+  {
+    "model": "checklists.checklist",
+    "pk": 1,
+    "fields": {
+      "name": "出荷前チェック",
+      "description": "出荷前に実施する標準チェック",
+      "category": 1
+    }
+  },
+  {
+    "model": "checklists.checklist",
+    "pk": 2,
+    "fields": {
+      "name": "寸法測定チェック",
+      "description": "主要寸法の確認",
+      "category": 2
+    }
+  },
+  {
+    "model": "checklists.checklistitem",
+    "pk": 1,
+    "fields": {
+      "checklist": 1,
+      "check_item": 1,
+      "order": 1,
+      "required": true
+    }
+  },
+  {
+    "model": "checklists.checklistitem",
+    "pk": 2,
+    "fields": {
+      "checklist": 1,
+      "check_item": 3,
+      "order": 2
+    }
+  },
+  {
+    "model": "checklists.checklistitem",
+    "pk": 3,
+    "fields": {
+      "checklist": 2,
+      "check_item": 2,
+      "order": 1,
+      "unit": "mm"
+    }
+  },
+  {
+    "model": "processes.processsheet",
+    "pk": 1,
+    "fields": {
+      "name": "工程A-001",
+      "project_name": "案件A",
+      "status": "planning",
+      "priority": 3,
+      "assignee": "田中",
+      "planned_start": "2025-11-01",
+      "planned_end": "2025-11-15",
+      "checklist": 1
+    }
+  },
+  {
+    "model": "processes.processsheet",
+    "pk": 2,
+    "fields": {
+      "name": "工程B-002",
+      "project_name": "案件B",
+      "status": "preparing",
+      "priority": 2,
+      "assignee": "佐藤",
+      "planned_start": "2025-11-05",
+      "planned_end": "2025-11-20",
+      "checklist": 2
+    }
+  },
+  {
+    "model": "tasks.task",
+    "pk": 1,
+    "fields": {
+      "title": "資料準備",
+      "description": "作業手順書の印刷",
+      "assignee": "山本",
+      "due_date": "2025-11-18",
+      "status": "doing",
+      "priority": "high",
+      "checklist_name": "出荷前チェック"
+    }
+  },
+  {
+    "model": "tasks.task",
+    "pk": 2,
+    "fields": {
+      "title": "測定器点検",
+      "description": "ノギス校正",
+      "assignee": "鈴木",
+      "due_date": "2025-11-19",
+      "status": "todo",
+      "priority": "medium"
+    }
+  }
+]
