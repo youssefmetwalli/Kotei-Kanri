@@ -1,6 +1,6 @@
 
 from rest_framework import viewsets, routers
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Checklist, ChecklistItem
 from .serializers import ChecklistSerializer, ChecklistItemReadSerializer
@@ -8,7 +8,7 @@ from .serializers import ChecklistSerializer, ChecklistItemReadSerializer
 class ChecklistViewSet(viewsets.ModelViewSet):
     queryset = Checklist.objects.all().prefetch_related("items__check_item","category").order_by("-updated_at")
     serializer_class = ChecklistSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["category"]
     search_fields = ["name","description"]
@@ -16,7 +16,7 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 class ChecklistItemViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ChecklistItem.objects.select_related("checklist","check_item").all()
     serializer_class = ChecklistItemReadSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filterset_fields = ["checklist"]
 
 router = routers.DefaultRouter()

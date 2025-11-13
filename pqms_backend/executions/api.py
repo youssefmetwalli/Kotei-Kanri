@@ -1,6 +1,6 @@
 
 from rest_framework import viewsets, routers
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Execution, ExecutionItemResult, ExecutionPhoto
 from .serializers import ExecutionSerializer, ExecutionItemResultReadSerializer, ExecutionPhotoSerializer
@@ -8,7 +8,7 @@ from .serializers import ExecutionSerializer, ExecutionItemResultReadSerializer,
 class ExecutionViewSet(viewsets.ModelViewSet):
     queryset = Execution.objects.select_related("checklist","process_sheet","executor").prefetch_related("item_results__photos").all().order_by("-updated_at")
     serializer_class = ExecutionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status","result","checklist","process_sheet","executor"]
     search_fields = ["comment"]
@@ -16,13 +16,13 @@ class ExecutionViewSet(viewsets.ModelViewSet):
 class ExecutionItemResultViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ExecutionItemResult.objects.select_related("execution","checklist_item").all()
     serializer_class = ExecutionItemResultReadSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filterset_fields = ["execution","checklist_item","status"]
 
 class ExecutionPhotoViewSet(viewsets.ModelViewSet):
     queryset = ExecutionPhoto.objects.select_related("item_result").all()
     serializer_class = ExecutionPhotoSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filterset_fields = ["item_result"]
 
 router = routers.DefaultRouter()
