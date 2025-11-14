@@ -15,7 +15,7 @@ import type {
   Execution,
   ProcessSheet,
   ExecutionItemResult,
-} from "../types/dashboard";
+} from "../types/backend";
 
 type DashboardStats = {
   monthlyExecutionCount: number;
