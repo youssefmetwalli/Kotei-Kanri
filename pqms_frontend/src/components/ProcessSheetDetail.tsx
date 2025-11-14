@@ -1,15 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { Textarea } from "./ui/textarea";
-import { Badge } from "./ui/badge";
 import { ArrowLeft, Plus, Play } from "lucide-react";
 import { ExecutionPreparation } from "./ExecutionPreparation";
+import { api } from "../lib/api";
+import type { ProcessSheet, Execution } from "../types/backend";
 
-interface ChecklistItem {
+interface ChecklistItemRow {
   id: number;
   name: string;
   itemCount: number;
@@ -30,13 +37,83 @@ interface ProcessSheetDetailProps {
   onBack: () => void;
 }
 
+interface ExecutionHistoryRow {
+  id: number;
+  date: string;
+  time: string;
+  resultLabel: "合格" | "不合格" | "要注意";
+  statusLabel: "完了" | "承認待ち" | "差戻し";
+  executor: string;
+}
+
+const mapPriorityNumberToLabel = (p?: number | null): "高" | "中" | "低" => {
+  if (p === 1) return "高";
+  if (p === 3) return "低";
+  return "中";
+};
+
+const mapPriorityLabelToNumber = (label: string): number => {
+  if (label === "高") return 1;
+  if (label === "低") return 3;
+  return 2;
+};
+
+const mapExecResultToLabel = (
+  r: Execution["result"]
+): "合格" | "不合格" | "要注意" => {
+  switch (r) {
+    case "pass":
+      return "合格";
+    case "fail":
+      return "不合格";
+    case "warn":
+      return "要注意";
+    default:
+      return "要注意";
+  }
+};
+
+const mapExecStatusToLabel = (
+  s: Execution["status"]
+): "完了" | "承認待ち" | "差戻し" => {
+  switch (s) {
+    case "completed":
+      return "完了";
+    case "approved":
+    case "running":
+      return "承認待ち";
+    case "rejected":
+      return "差戻し";
+    case "draft":
+    default:
+      return "承認待ち";
+  }
+};
+
+const formatDateTime = (iso: string | null | undefined) => {
+  if (!iso) return { date: "-", time: "-" };
+  const d = new Date(iso);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
+};
+
 export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
   const [showExecutionPrep, setShowExecutionPrep] = useState(false);
-  const [checklists, setChecklists] = useState<ChecklistItem[]>([
-    { id: 1, name: "外観検査", itemCount: 8, estimatedTime: "10分", status: "未実行" },
-    { id: 2, name: "寸法検査", itemCount: 12, estimatedTime: "15分", status: "未実行" },
-    { id: 3, name: "機能検査", itemCount: 6, estimatedTime: "20分", status: "未実行" },
-  ]);
+
+  const [backendSheet, setBackendSheet] = useState<ProcessSheet | null>(null);
+  const [checklists, setChecklists] = useState<ChecklistItemRow[]>([]);
+  const [executionHistory, setExecutionHistory] = useState<
+    ExecutionHistoryRow[]
+  >([]);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const [sheetData, setSheetData] = useState({
     name: `${sheet.productName} 初期ロット検査`,
@@ -45,7 +122,7 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     lotNumber: sheet.lotNumber,
     assignee: sheet.assignee,
     deadline: sheet.deadline,
-    priority: "高",
+    priority: "高" as "高" | "中" | "低",
   });
 
   const getStatusColor = (status: string) => {
@@ -59,11 +136,145 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     }
   };
 
+  // ---- Load ProcessSheet detail + execution history from backend ----
+  useEffect(() => {
+    const fetchDetail = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // ProcessSheet detail
+        const sheetRes = await api.get<ProcessSheet>(
+          `/process-sheets/${sheet.id}/`
+        );
+        const ps = sheetRes.data;
+        setBackendSheet(ps);
+
+        const deadlineDate =
+          ps.planned_end?.slice(0, 10) || sheet.deadline || "";
+
+        setSheetData((prev) => ({
+          ...prev,
+          name: ps.name || prev.name,
+          description: ps.notes ?? prev.description,
+          product: ps.project_name || prev.product,
+          assignee: ps.assignee || prev.assignee,
+          deadline: deadlineDate,
+          priority: mapPriorityNumberToLabel(ps.priority),
+        }));
+
+        if (ps.checklist) {
+          const itemCount =
+            (ps.checklist as any).items?.length ??
+            (ps as any).checklist_items?.length ??
+            0;
+
+          const checklistRow: ChecklistItemRow = {
+            id: ps.checklist.id,
+            name: ps.checklist.name,
+            itemCount,
+            estimatedTime: "-", // no field in backend; can be extended later
+            status: "未実行",
+          };
+          setChecklists([checklistRow]);
+        } else {
+          setChecklists([]);
+        }
+
+        // Execution history for this process sheet
+        const execRes = await api.get<{
+          count?: number;
+          results?: Execution[];
+        }>("/executions/", {
+          params: { process_sheet: sheet.id },
+        });
+
+        const executions: Execution[] =
+          execRes.data.results ?? (execRes.data as any) ?? [];
+
+        const historyRows: ExecutionHistoryRow[] = executions.map((e) => {
+          const { date, time } = formatDateTime(
+            e.finished_at || e.started_at || e.created_at
+          );
+
+          let executorName = "-";
+          if (typeof e.executor === "string") {
+            executorName = e.executor;
+          } else if (
+            e.executor &&
+            typeof e.executor === "object" &&
+            "username" in e.executor
+          ) {
+            executorName = (e.executor as any).username;
+          }
+
+          return {
+            id: e.id,
+            date,
+            time,
+            resultLabel: mapExecResultToLabel(e.result),
+            statusLabel: mapExecStatusToLabel(e.status),
+            executor: executorName,
+          };
+        });
+
+        setExecutionHistory(historyRows);
+      } catch (err) {
+        console.error(err);
+        setError("工程シート詳細の取得に失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDetail();
+  }, [
+    sheet.id,
+    sheet.productName,
+    sheet.assignee,
+    sheet.deadline,
+    sheet.lotNumber,
+  ]);
+
   const handleStartExecution = () => {
-    // TODO: 実際の実行画面への遷移
+    // TODO: 実際の実行画面への遷移と Execution 作成
     console.log("実行開始");
     setShowExecutionPrep(false);
     onBack();
+  };
+
+  const handleSave = async () => {
+    if (!backendSheet) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const payload: Partial<ProcessSheet> & {
+        notes?: string;
+        project_name?: string;
+      } = {
+        name: sheetData.name,
+        project_name: sheetData.product,
+        planned_end: sheetData.deadline ? sheetData.deadline : null,
+        assignee: sheetData.assignee,
+        priority: mapPriorityLabelToNumber(sheetData.priority),
+        notes: sheetData.description,
+      };
+
+      const res = await api.patch<ProcessSheet>(
+        `/process-sheets/${backendSheet.id}/`,
+        payload
+      );
+      setBackendSheet(res.data);
+      setSaveMessage("保存しました。");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      console.error(err);
+      setError("工程シートの保存に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (showExecutionPrep) {
@@ -87,12 +298,27 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
           </Button>
           <div>
             <h2 className="text-gray-900">工程チェックシート詳細</h2>
+            {backendSheet && (
+              <p className="text-xs text-gray-500 mt-1">
+                ID: {backendSheet.id} / ステータス: {backendSheet.status}
+              </p>
+            )}
           </div>
         </div>
       </header>
 
       <div className="p-6">
         <div className="max-w-5xl mx-auto space-y-6">
+          {loading && (
+            <p className="text-sm text-gray-500 mb-2">
+              工程シート情報を読み込み中です...
+            </p>
+          )}
+          {error && <p className="text-sm text-red-600 mb-2">{error}</p>}
+          {saveMessage && (
+            <p className="text-sm text-green-600 mb-2">{saveMessage}</p>
+          )}
+
           {/* Basic Information */}
           <Card>
             <CardHeader>
@@ -104,7 +330,9 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                 <Input
                   id="sheet-name"
                   value={sheetData.name}
-                  onChange={(e) => setSheetData({ ...sheetData, name: e.target.value })}
+                  onChange={(e) =>
+                    setSheetData({ ...sheetData, name: e.target.value })
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -112,18 +340,32 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                 <Textarea
                   id="description"
                   value={sheetData.description}
-                  onChange={(e) => setSheetData({ ...sheetData, description: e.target.value })}
+                  onChange={(e) =>
+                    setSheetData({
+                      ...sheetData,
+                      description: e.target.value,
+                    })
+                  }
                   rows={2}
                 />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="product">製品</Label>
-                  <Select value={sheetData.product}>
+                  <Select
+                    value={sheetData.product}
+                    onValueChange={(value: string) =>
+                      setSheetData((prev) => ({ ...prev, product: value }))
+                    }
+                  >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="製品を選択" />
                     </SelectTrigger>
                     <SelectContent>
+                      {/* 静的な候補。必要であればマスタから取得するように拡張可能 */}
+                      <SelectItem value={sheetData.product}>
+                        {sheetData.product}
+                      </SelectItem>
                       <SelectItem value="製品A">製品A</SelectItem>
                       <SelectItem value="製品B">製品B</SelectItem>
                       <SelectItem value="製品C">製品C</SelectItem>
@@ -135,18 +377,31 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                   <Input
                     id="lot-number"
                     value={sheetData.lotNumber}
-                    onChange={(e) => setSheetData({ ...sheetData, lotNumber: e.target.value })}
+                    onChange={(e) =>
+                      setSheetData({
+                        ...sheetData,
+                        lotNumber: e.target.value,
+                      })
+                    }
                   />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="assignee">担当者</Label>
-                  <Select value={sheetData.assignee}>
+                  <Select
+                    value={sheetData.assignee}
+                    onValueChange={(value: string) =>
+                      setSheetData((prev) => ({ ...prev, assignee: value }))
+                    }
+                  >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="担当者を選択" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={sheetData.assignee}>
+                        {sheetData.assignee}
+                      </SelectItem>
                       <SelectItem value="田中太郎">田中太郎</SelectItem>
                       <SelectItem value="鈴木一郎">鈴木一郎</SelectItem>
                       <SelectItem value="高橋三郎">高橋三郎</SelectItem>
@@ -159,12 +414,22 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                     id="deadline"
                     type="date"
                     value={sheetData.deadline}
-                    onChange={(e) => setSheetData({ ...sheetData, deadline: e.target.value })}
+                    onChange={(e) =>
+                      setSheetData({
+                        ...sheetData,
+                        deadline: e.target.value,
+                      })
+                    }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="priority">優先度</Label>
-                  <Select value={sheetData.priority}>
+                  <Select
+                    value={sheetData.priority}
+                    onValueChange={(value: "高" | "中" | "低") =>
+                      setSheetData((prev) => ({ ...prev, priority: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -183,54 +448,131 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>作業チェックリスト ({checklists.length}つ)</CardTitle>
-                <Button variant="outline" size="sm">
+                <CardTitle>
+                  作業チェックリスト ({checklists.length}つ)
+                </CardTitle>
+                <Button variant="outline" size="sm" disabled>
                   <Plus className="w-4 h-4 mr-2" />
                   作業チェックリストを追加
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">#</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">リスト名</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">項目数</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">推定時間</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">ステータス</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {checklists.map((checklist, index) => (
-                      <tr key={checklist.id} className="border-b hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{checklist.name}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{checklist.itemCount}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{checklist.estimatedTime}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(checklist.status)}`}>
-                            {checklist.status}
-                          </span>
-                        </td>
+              {checklists.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">
+                  この工程に紐づくチェックリストはまだありません。
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          #
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          リスト名
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          項目数
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          推定時間
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          ステータス
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {checklists.map((checklist, index) => (
+                        <tr
+                          key={checklist.id}
+                          className="border-b hover:bg-gray-50"
+                        >
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {index + 1}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {checklist.name}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {checklist.itemCount}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {checklist.estimatedTime}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(
+                                checklist.status
+                              )}`}
+                            >
+                              {checklist.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
 
           {/* Execution History */}
           <Card>
             <CardHeader>
-              <CardTitle>実行履歴 (0件)</CardTitle>
+              <CardTitle>実行履歴 ({executionHistory.length}件)</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-gray-500">
-                実行履歴がありません
-              </div>
+              {executionHistory.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  実行履歴がありません
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-gray-600">
+                          実行日時
+                        </th>
+                        <th className="text-left px-4 py-3 text-gray-600">
+                          判定
+                        </th>
+                        <th className="text-left px-4 py-3 text-gray-600">
+                          ステータス
+                        </th>
+                        <th className="text-left px-4 py-3 text-gray-600">
+                          実行者
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {executionHistory.map((row) => (
+                        <tr key={row.id} className="border-b">
+                          <td className="px-4 py-3">
+                            <div className="text-gray-900">{row.date}</div>
+                            <div className="text-gray-600 text-xs">
+                              {row.time}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.resultLabel}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.statusLabel}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.executor}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -239,8 +581,8 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
             <Button variant="outline" onClick={onBack}>
               キャンセル
             </Button>
-            <Button variant="outline">
-              保存
+            <Button variant="outline" onClick={handleSave} disabled={saving}>
+              {saving ? "保存中..." : "保存"}
             </Button>
             <Button onClick={() => setShowExecutionPrep(true)}>
               <Play className="w-4 h-4 mr-2" />
