@@ -42,14 +42,17 @@ export interface ProcessSheet {
   name: string;
   project_name: string;
   status: ProcessStatusCode;
+  status_display: string;
   priority: number;
   assignee: string;
   planned_start: string | null;
   planned_end: string | null;
   checklist: Checklist | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
+
 
 export type ItemStatusCode = "OK" | "NG" | "SKIP";
 
