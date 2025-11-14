@@ -28,6 +28,11 @@ export interface Execution {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+
+  // for quality control
+  checklist?: Checklist | null;
+  process_sheet?: ProcessSheet | null;
+  executor?: string | { id: number; username: string } | null;
 }
 
 export type ProcessStatusCode = "planning" | "preparing" | "running" | "done";
