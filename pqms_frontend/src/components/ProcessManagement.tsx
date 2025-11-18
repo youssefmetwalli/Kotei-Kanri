@@ -1,18 +1,38 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Textarea } from "./ui/textarea";
-import { Plus, Search, Filter, FileText, BarChart3, LayoutGrid, List, Calendar, User } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Filter,
+  FileText,
+  BarChart3,
+  LayoutGrid,
+  List,
+  Calendar,
+  User,
+} from "lucide-react";
 import { ProcessSheetDetail } from "./ProcessSheetDetail";
+import { api } from "../lib/api";
+import type { ProcessSheet as BackendProcessSheet } from "../types/backend";
 
-interface ProcessSheet {
+const ITEM_TYPE = "PROCESS_CARD";
+
+type KanbanStatus = "計画中" | "実行準備中" | "実行中" | "完了";
+
+interface ProcessSheetCard {
   id: number;
   productName: string;
   lotNumber: string;
@@ -20,15 +40,13 @@ interface ProcessSheet {
   inspector: string;
   progress: number;
   deadline: string;
-  status: "計画中" | "実行準備中" | "実行中" | "完了";
+  status: KanbanStatus;
 }
 
-const ITEM_TYPE = "PROCESS_CARD";
-
 interface DraggableCardProps {
-  sheet: ProcessSheet;
+  sheet: ProcessSheetCard;
   statusColor: string;
-  onCardClick: (sheet: ProcessSheet) => void;
+  onCardClick: (sheet: ProcessSheetCard) => void;
 }
 
 function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) {
@@ -41,7 +59,10 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
   });
 
   return (
-    <div ref={drag} style={{ opacity: isDragging ? 0.5 : 1 }}>
+    <div
+      ref={(el) => drag(el)}
+      style={{ opacity: isDragging ? 0.5 : 1 }}
+    >
       <Card
         className={`${statusColor} border-2 hover:shadow-lg transition-shadow cursor-pointer`}
         onClick={(e) => {
@@ -52,9 +73,7 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
         <CardContent className="p-4 space-y-3">
           <div>
             <h4 className="text-gray-900 mb-1">{sheet.productName}</h4>
-            <p className="text-sm text-gray-600">
-              ロット: {sheet.lotNumber}
-            </p>
+            <p className="text-sm text-gray-600">ロット: {sheet.lotNumber}</p>
           </div>
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2 text-gray-600">
@@ -74,7 +93,9 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-gray-600">進捗</span>
-                <span className="text-xs text-gray-900">{sheet.progress}%</span>
+                <span className="text-xs text-gray-900">
+                  {sheet.progress}%
+                </span>
               </div>
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div
@@ -84,7 +105,12 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
               </div>
             </div>
           )}
-          <Button variant="outline" size="sm" className="w-full" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
             + 新規追加
           </Button>
         </CardContent>
@@ -94,18 +120,25 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
 }
 
 interface DroppableColumnProps {
-  status: "計画中" | "実行準備中" | "実行中" | "完了";
-  sheets: ProcessSheet[];
+  status: KanbanStatus;
+  sheets: ProcessSheetCard[];
   statusColor: string;
-  onDrop: (itemId: number, newStatus: "計画中" | "実行準備中" | "実行中" | "完了") => void;
-  onCardClick: (sheet: ProcessSheet) => void;
+  onDrop: (itemId: number, newStatus: KanbanStatus) => void;
+  onCardClick: (sheet: ProcessSheetCard) => void;
   count: number;
 }
 
-function DroppableColumn({ status, sheets, statusColor, onDrop, onCardClick, count }: DroppableColumnProps) {
+function DroppableColumn({
+  status,
+  sheets,
+  statusColor,
+  onDrop,
+  onCardClick,
+  count,
+}: DroppableColumnProps) {
   const [{ isOver }, drop] = useDrop({
     accept: ITEM_TYPE,
-    drop: (item: { id: number; status: string }) => {
+    drop: (item: { id: number; status: KanbanStatus }) => {
       if (item.status !== status) {
         onDrop(item.id, status);
       }
@@ -142,80 +175,58 @@ function DroppableColumn({ status, sheets, statusColor, onDrop, onCardClick, cou
   );
 }
 
+// backend status <-> kanban label mapping
+const backendToKanbanStatus = (
+  status: BackendProcessSheet["status"]
+): KanbanStatus => {
+  switch (status) {
+    case "planning":
+      return "計画中";
+    case "preparing":
+      return "実行準備中";
+    case "running":
+      return "実行中";
+    case "done":
+      return "完了";
+    default:
+      return "計画中";
+  }
+};
+
+const kanbanToBackendStatus = (
+  status: KanbanStatus
+): BackendProcessSheet["status"] => {
+  switch (status) {
+    case "計画中":
+      return "planning";
+    case "実行準備中":
+      return "preparing";
+    case "実行中":
+      return "running";
+    case "完了":
+      return "done";
+  }
+};
+
 export function ProcessManagement() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
-  const [selectedSheet, setSelectedSheet] = useState<ProcessSheet | null>(null);
-  const [processSheets, setProcessSheets] = useState<ProcessSheet[]>([
-    {
-      id: 1,
-      productName: "製品A",
-      lotNumber: "LOT-A1",
-      assignee: "田中太郎",
-      inspector: "佐藤花子",
-      progress: 0,
-      deadline: "2025-11-15",
-      status: "計画中",
-    },
-    {
-      id: 2,
-      productName: "製品B",
-      lotNumber: "LOT-B2",
-      assignee: "鈴木一郎",
-      inspector: "山田次郎",
-      progress: 0,
-      deadline: "2025-11-12",
-      status: "実行準備中",
-    },
-    {
-      id: 3,
-      productName: "製品C",
-      lotNumber: "LOT-C1",
-      assignee: "高橋三郎",
-      inspector: "伊藤美咲",
-      progress: 65,
-      deadline: "2025-11-10",
-      status: "実行中",
-    },
-    {
-      id: 4,
-      productName: "製品D",
-      lotNumber: "LOT-D3",
-      assignee: "渡辺五郎",
-      inspector: "中村愛",
-      progress: 100,
-      deadline: "2025-11-08",
-      status: "完了",
-    },
-    {
-      id: 5,
-      productName: "製品E",
-      lotNumber: "LOT-E1",
-      assignee: "小林太郎",
-      inspector: "加藤美優",
-      progress: 0,
-      deadline: "2025-11-20",
-      status: "計画中",
-    },
-    {
-      id: 6,
-      productName: "製品F",
-      lotNumber: "LOT-F2",
-      assignee: "木村健太",
-      inspector: "吉田さくら",
-      progress: 45,
-      deadline: "2025-11-09",
-      status: "実行中",
-    },
-  ]);
+  const [selectedSheet, setSelectedSheet] = useState<ProcessSheetCard | null>(
+    null
+  );
+  const [processSheets, setProcessSheets] = useState<ProcessSheetCard[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const statuses: Array<"計画中" | "実行準備中" | "実行中" | "完了"> = [
-    "計画中",
-    "実行準備中",
-    "実行中",
-    "完了",
-  ];
+  // new sheet form
+  const [newProductName, setNewProductName] = useState("");
+  const [newLotNumber, setNewLotNumber] = useState("");
+  const [newAssignee, setNewAssignee] = useState("");
+  const [newInspector, setNewInspector] = useState("");
+  const [newDeadline, setNewDeadline] = useState("");
 
-  const getStatusColor = (status: string) => {
+  const statuses: KanbanStatus[] = ["計画中", "実行準備中", "実行中", "完了"];
+
+  const getStatusColor = (status: KanbanStatus) => {
     switch (status) {
       case "計画中":
         return "bg-gray-100 border-gray-300";
@@ -230,187 +241,374 @@ export function ProcessManagement() {
     }
   };
 
-  const getStatusCount = (status: string) => {
+  const getStatusCount = (status: KanbanStatus) => {
     return processSheets.filter((sheet) => sheet.status === status).length;
   };
 
-  const handleDrop = (itemId: number, newStatus: "計画中" | "実行準備中" | "実行中" | "完了") => {
+  // ---- load process sheets from backend ----
+  useEffect(() => {
+    const fetchSheets = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get<{
+          count?: number;
+          results?: BackendProcessSheet[];
+        }>("/process-sheets/");
+
+        const backendSheets: BackendProcessSheet[] =
+          res.data.results ?? (res.data as any) ?? [];
+
+        const mapped: ProcessSheetCard[] = backendSheets.map((ps) => {
+          const deadline = ps.planned_end ? ps.planned_end.slice(0, 10) : "";
+
+          return {
+            id: ps.id,
+            productName: ps.project_name || ps.name || "未設定",
+            lotNumber: ps.lot_number || "-",
+            assignee: ps.assignee || "未設定",
+            inspector: ps.inspector || "-",
+            progress: ps.progress ?? 0,
+            deadline,
+            status: backendToKanbanStatus(ps.status),
+          };
+        });
+
+        setProcessSheets(mapped);
+      } catch (err) {
+        console.error(err);
+        setError("工程シート一覧の取得に失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSheets();
+  }, []);
+
+  const handleDrop = async (itemId: number, newStatus: KanbanStatus) => {
+    // optimistic UI update (only status; progress could be managed elsewhere)
     setProcessSheets((prevSheets) =>
       prevSheets.map((sheet) =>
         sheet.id === itemId ? { ...sheet, status: newStatus } : sheet
       )
     );
+
+    try {
+      const backendStatus = kanbanToBackendStatus(newStatus);
+      await api.patch(`/process-sheets/${itemId}/`, {
+        status: backendStatus,
+      });
+    } catch (err) {
+      console.error(err);
+      setError("ステータス更新に失敗しました。");
+    }
+  };
+
+  const handleCreateSheet = async () => {
+    try {
+      const payload: Partial<BackendProcessSheet> & {
+        project_name: string;
+      } = {
+        name: newProductName
+          ? `${newProductName} 工程シート`
+          : "新規工程シート",
+        project_name: newProductName || "未設定",
+        assignee: newAssignee || "",
+        planned_end: newDeadline || null,
+        priority: 2,
+        status: "planning",
+        notes: "",
+        lot_number: newLotNumber || "",
+        inspector: newInspector || "",
+        progress: 0,
+      };
+
+      const res = await api.post<BackendProcessSheet>(
+        "/process-sheets/",
+        payload
+      );
+      const ps = res.data;
+
+      const newCard: ProcessSheetCard = {
+        id: ps.id,
+        productName: ps.project_name || ps.name || "未設定",
+        lotNumber: ps.lot_number || "-",
+        assignee: ps.assignee || "未設定",
+        inspector: ps.inspector || "-",
+        progress: ps.progress ?? 0,
+        deadline: ps.planned_end ? ps.planned_end.slice(0, 10) : "",
+        status: backendToKanbanStatus(ps.status),
+      };
+
+      setProcessSheets((prev) => [...prev, newCard]);
+      // reset form
+      setNewProductName("");
+      setNewLotNumber("");
+      setNewAssignee("");
+      setNewInspector("");
+      setNewDeadline("");
+    } catch (err) {
+      console.error(err);
+      setError("工程シートの作成に失敗しました。");
+    }
   };
 
   if (selectedSheet) {
-    return <ProcessSheetDetail sheet={selectedSheet} onBack={() => setSelectedSheet(null)} />;
+    return (
+      <ProcessSheetDetail
+        sheet={selectedSheet}
+        onBack={() => setSelectedSheet(null)}
+      />
+    );
   }
 
   return (
     <DndProvider backend={HTML5Backend}>
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-gray-900">工程チェックシート管理</h2>
-            <p className="text-sm text-gray-500 mt-1">工程シートの作成と進捗管理</p>
-          </div>
-        </div>
-      </header>
-
-      <div className="p-6">
-        {/* Action Bar */}
-        <div className="mb-6 space-y-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input placeholder="検索..." className="pl-10" />
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-gray-900">工程チェックシート管理</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                工程シートの作成と進捗管理（バックエンド連携）
+              </p>
             </div>
-            <Button variant="outline">
-              <Filter className="w-4 h-4 mr-2" />
-              フィルタ
-            </Button>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="w-4 h-4 mr-2" />
-                  新規工程シート作成
+          </div>
+        </header>
+
+        <div className="p-6">
+          {/* Action Bar */}
+          <div className="mb-6 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input placeholder="検索..." className="pl-10" />
+              </div>
+              <Button variant="outline">
+                <Filter className="w-4 h-4 mr-2" />
+                フィルタ
+              </Button>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="w-4 h-4 mr-2" />
+                    新規工程シート作成
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>新規工程シートの作成</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="product-name">製品名</Label>
+                        <Input
+                          id="product-name"
+                          placeholder="例: 製品A"
+                          value={newProductName}
+                          onChange={(e) =>
+                            setNewProductName(e.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="lot-number">ロット番号</Label>
+                        <Input
+                          id="lot-number"
+                          placeholder="例: LOT-A1"
+                          value={newLotNumber}
+                          onChange={(e) =>
+                            setNewLotNumber(e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="assignee">担当者</Label>
+                        <Input
+                          id="assignee"
+                          placeholder="例: 田中太郎"
+                          value={newAssignee}
+                          onChange={(e) =>
+                            setNewAssignee(e.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="inspector">検査員</Label>
+                        <Input
+                          id="inspector"
+                          placeholder="例: 佐藤花子"
+                          value={newInspector}
+                          onChange={(e) =>
+                            setNewInspector(e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="deadline">期限</Label>
+                      <Input
+                        id="deadline"
+                        type="date"
+                        value={newDeadline}
+                        onChange={(e) =>
+                          setNewDeadline(e.target.value)
+                        }
+                      />
+                    </div>
+                    <Button className="w-full" onClick={handleCreateSheet}>
+                      作成
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm">
+                  <FileText className="w-4 h-4 mr-2" />
+                  テンプレートから作成
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>新規工程シートの作成</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="product-name">製品名</Label>
-                      <Input id="product-name" placeholder="例: 製品A" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lot-number">ロット番号</Label>
-                      <Input id="lot-number" placeholder="例: LOT-A1" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="assignee">担当者</Label>
-                      <Input id="assignee" placeholder="例: 田中太郎" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="inspector">検査員</Label>
-                      <Input id="inspector" placeholder="例: 佐藤花子" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="deadline">期限</Label>
-                    <Input id="deadline" type="date" />
-                  </div>
-                  <Button className="w-full">作成</Button>
+                <Button variant="outline" size="sm">
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  レポート出力
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm">
+                  すべての製品
+                </Button>
+                <Button variant="outline" size="sm">
+                  すべての優先度
+                </Button>
+                <div className="flex border rounded-lg overflow-hidden">
+                  <Button
+                    variant={viewMode === "kanban" ? "default" : "ghost"}
+                    size="sm"
+                    className="rounded-none"
+                    onClick={() => setViewMode("kanban")}
+                  >
+                    <LayoutGrid className="w-4 h-4 mr-2" />
+                    カンバン
+                  </Button>
+                  <Button
+                    variant={viewMode === "list" ? "default" : "ghost"}
+                    size="sm"
+                    className="rounded-none"
+                    onClick={() => setViewMode("list")}
+                  >
+                    <List className="w-4 h-4 mr-2" />
+                    リスト
+                  </Button>
                 </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm">
-                <FileText className="w-4 h-4 mr-2" />
-                テンプレートから作成
-              </Button>
-              <Button variant="outline" size="sm">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                レポート出力
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm">
-                すべての製品
-              </Button>
-              <Button variant="outline" size="sm">
-                すべての優先度
-              </Button>
-              <div className="flex border rounded-lg overflow-hidden">
-                <Button
-                  variant={viewMode === "kanban" ? "default" : "ghost"}
-                  size="sm"
-                  className="rounded-none"
-                  onClick={() => setViewMode("kanban")}
-                >
-                  <LayoutGrid className="w-4 h-4 mr-2" />
-                  カンバン
-                </Button>
-                <Button
-                  variant={viewMode === "list" ? "default" : "ghost"}
-                  size="sm"
-                  className="rounded-none"
-                  onClick={() => setViewMode("list")}
-                >
-                  <List className="w-4 h-4 mr-2" />
-                  リスト
-                </Button>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Kanban Board */}
-        {viewMode === "kanban" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {statuses.map((status) => (
-              <DroppableColumn
-                key={status}
-                status={status}
-                sheets={processSheets.filter((sheet) => sheet.status === status)}
-                statusColor={getStatusColor(status)}
-                onDrop={handleDrop}
-                onCardClick={setSelectedSheet}
-                count={getStatusCount(status)}
-              />
-            ))}
-          </div>
-        )}
+          {loading && (
+            <p className="text-sm text-gray-500 mb-2">
+              工程シートを読み込み中です...
+            </p>
+          )}
+          {error && (
+            <p className="text-sm text-red-600 mb-2">{error}</p>
+          )}
 
-        {/* List View */}
-        {viewMode === "list" && (
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">製品名</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">ロット番号</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">ステータス</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">担当者</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">検査員</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">進捗</th>
-                      <th className="text-left px-4 py-3 text-sm text-gray-600">期限</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {processSheets.map((sheet) => (
-                      <tr key={sheet.id} className="border-b hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.productName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.lotNumber}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="secondary">{sheet.status}</Badge>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.assignee}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.inspector}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.progress}%</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{sheet.deadline}</td>
+          {/* Kanban Board */}
+          {viewMode === "kanban" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {statuses.map((status) => (
+                <DroppableColumn
+                  key={status}
+                  status={status}
+                  sheets={processSheets.filter(
+                    (sheet) => sheet.status === status
+                  )}
+                  statusColor={getStatusColor(status)}
+                  onDrop={handleDrop}
+                  onCardClick={setSelectedSheet}
+                  count={getStatusCount(status)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* List View */}
+          {viewMode === "list" && (
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          製品名
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          ロット番号
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          ステータス
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          担当者
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          検査員
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          進捗
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm text-gray-600">
+                          期限
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                    </thead>
+                    <tbody>
+                      {processSheets.map((sheet) => (
+                        <tr
+                          key={sheet.id}
+                          className="border-b hover:bg-gray-50"
+                        >
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.productName}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.lotNumber}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="secondary">
+                              {sheet.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.assignee}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.inspector}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.progress}%
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {sheet.deadline}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
-    </div>
     </DndProvider>
   );
 }

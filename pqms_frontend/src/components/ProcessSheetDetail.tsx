@@ -121,7 +121,8 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     product: sheet.productName,
     lotNumber: sheet.lotNumber,
     assignee: sheet.assignee,
-    deadline: sheet.deadline,
+    inspector: sheet.inspector,
+    deadline: sheet.deadline, // yyyy-mm-dd
     priority: "高" as "高" | "中" | "低",
   });
 
@@ -158,10 +159,13 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
           description: ps.notes ?? prev.description,
           product: ps.project_name || prev.product,
           assignee: ps.assignee || prev.assignee,
+          lotNumber: ps.lot_number || prev.lotNumber,
+          inspector: ps.inspector || prev.inspector,
           deadline: deadlineDate,
           priority: mapPriorityNumberToLabel(ps.priority),
         }));
 
+        // Checklist (if any)
         if (ps.checklist) {
           const itemCount =
             (ps.checklist as any).items?.length ??
@@ -233,6 +237,7 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     sheet.assignee,
     sheet.deadline,
     sheet.lotNumber,
+    sheet.inspector,
   ]);
 
   const handleStartExecution = () => {
@@ -243,9 +248,8 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
   };
 
   const handleSave = async () => {
-    if (!backendSheet) {
-      return;
-    }
+    if (!backendSheet) return;
+
     setSaving(true);
     setError(null);
     setSaveMessage(null);
@@ -256,10 +260,14 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
       } = {
         name: sheetData.name,
         project_name: sheetData.product,
-        planned_end: sheetData.deadline ? sheetData.deadline : null,
         assignee: sheetData.assignee,
+        planned_end: sheetData.deadline ? sheetData.deadline : null,
         priority: mapPriorityLabelToNumber(sheetData.priority),
         notes: sheetData.description,
+        lot_number: sheetData.lotNumber,
+        inspector: sheetData.inspector,
+        // keep existing progress as-is; could also be edited if you add a UI
+        progress: backendSheet.progress,
       };
 
       const res = await api.patch<ProcessSheet>(
@@ -349,6 +357,7 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                   rows={2}
                 />
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="product">製品</Label>
@@ -362,7 +371,6 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                       <SelectValue placeholder="製品を選択" />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* 静的な候補。必要であればマスタから取得するように拡張可能 */}
                       <SelectItem value={sheetData.product}>
                         {sheetData.product}
                       </SelectItem>
@@ -386,6 +394,7 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                   />
                 </div>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="assignee">担当者</Label>
@@ -408,6 +417,21 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="inspector">検査員</Label>
+                  <Input
+                    id="inspector"
+                    value={sheetData.inspector}
+                    onChange={(e) =>
+                      setSheetData({
+                        ...sheetData,
+                        inspector: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="deadline">期限</Label>
                   <Input
@@ -422,6 +446,9 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
                     }
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="priority">優先度</Label>
                   <Select
