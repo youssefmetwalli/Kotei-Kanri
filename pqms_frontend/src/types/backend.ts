@@ -49,10 +49,12 @@ export interface ProcessSheet {
   planned_end: string | null;
   checklist: Checklist | null;
   notes: string | null;
+  lot_number: string;
+  inspector: string;
+  progress: number;
   created_at: string;
   updated_at: string;
 }
-
 
 export type ItemStatusCode = "OK" | "NG" | "SKIP";
 
