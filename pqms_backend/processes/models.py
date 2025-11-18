@@ -19,4 +19,10 @@ class ProcessSheet(TimeStampedModel):
     planned_end = models.DateField(null=True, blank=True)
     checklist = models.ForeignKey(Checklist, on_delete=models.SET_NULL, null=True, blank=True, related_name="process_sheets")
     notes = models.TextField(blank=True)
+    lot_number = models.CharField(max_length=255, blank=True, default="")
+    inspector = models.CharField(max_length=255, blank=True, default="")
+    progress = models.IntegerField(default=0)  # 0–100 %
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     def __str__(self): return f"{self.name} ({self.get_status_display()})"

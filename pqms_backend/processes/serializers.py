@@ -10,4 +10,4 @@ class ProcessSheetSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = ProcessSheet
-        fields = ["id","name","project_name","status","status_display","priority","assignee","planned_start","planned_end","checklist","checklist_id","notes","created_at","updated_at"]
+        fields = ["id","name","project_name","status","status_display","priority","assignee","planned_start","planned_end","checklist","checklist_id","notes", "lot_number", "inspector", "progress","created_at","updated_at"]
