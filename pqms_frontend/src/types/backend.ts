@@ -65,3 +65,29 @@ export interface ExecutionItemResult {
   note: string;
   created_at: string;
 }
+
+export type CheckItemType = "number" | "text" | "select" | "boolean" | "photo";
+
+export interface CheckItem {
+  id: number;
+  name: string;
+  type: CheckItemType;
+  category: number | null;
+  category_detail?: { id: number; name: string } | null;
+  required: boolean;
+  unit: string;
+  description: string;
+  options: any[];
+
+  tags: string;
+  min_value: number | null;
+  max_value: number | null;
+  decimal_places: number;
+  default_value: number | null;
+  error_message: string;
+  allow_handwriting: boolean;
+  reference_image: string;
+
+  created_at: string;
+  updated_at: string;
+}
