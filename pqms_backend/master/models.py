@@ -22,4 +22,13 @@ class CheckItem(TimeStampedModel):
     unit = models.CharField(max_length=50, blank=True)
     description = models.TextField(blank=True)
     options = models.JSONField(default=list, blank=True)
+    tags = models.CharField(max_length=255, blank=True)
+    min_value = models.FloatField(null=True, blank=True)
+    max_value = models.FloatField(null=True, blank=True)
+    decimal_places = models.PositiveSmallIntegerField(default=0)
+    default_value = models.FloatField(null=True, blank=True)
+    error_message = models.CharField(max_length=255, blank=True)
+    allow_handwriting = models.BooleanField(default=False)
+    # base64 画像 or URL を保存するためのフィールド
+    reference_image = models.TextField(blank=True)
     def __str__(self): return self.name
