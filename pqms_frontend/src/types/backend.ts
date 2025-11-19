@@ -45,16 +45,11 @@ export interface CheckItem {
   id: number;
   name: string;
   type: CheckItemType;
-
-  // depending on serializer: id or object
   category: number | Category | null;
-
   required: boolean;
   unit: string;
   description: string | null;
   options: any[];
-
-  // extended fields (your added custom fields)
   tags: string;
   min_value: number | null;
   max_value: number | null;
@@ -63,7 +58,6 @@ export interface CheckItem {
   error_message: string;
   allow_handwriting: boolean;
   reference_image: string;
-
   created_at: string;
   updated_at: string;
 }
@@ -100,9 +94,6 @@ export interface Checklist {
   updated_at: string;
 }
 
-// --------------------------------------------------------
-// ProcessSheet
-// --------------------------------------------------------
 export type ProcessStatusCode =
   | "planning"
   | "preparing"
@@ -123,14 +114,10 @@ export interface ProcessSheet {
   planned_end: string | null;
 
   checklist: Checklist | null;
-
   notes: string | null;
-
-  // your newly added fields:
   lot_number: string;
   inspector: string;
   progress: number;
-
   created_at: string;
   updated_at: string;
 }
