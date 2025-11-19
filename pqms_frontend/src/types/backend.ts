@@ -94,13 +94,8 @@ export interface Checklist {
   id: number;
   name: string;
   description: string | null;
-
-  // nested or id depending on serializer
   category: Category | number | null;
-
-  // VERY IMPORTANT for ChecklistDetail
   items?: ChecklistItem[];
-
   created_at: string;
   updated_at: string;
 }
