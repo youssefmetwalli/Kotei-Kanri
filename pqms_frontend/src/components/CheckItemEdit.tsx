@@ -1,46 +1,80 @@
+// src/components/CheckItemEdit.tsx
 import { useState, useRef } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { Checkbox } from "./ui/checkbox";
 import { ArrowLeft, Upload, Eye } from "lucide-react";
+import { api } from "../lib/api";
+import type { CheckItem, CheckItemType } from "../types/backend";
 
 interface CheckItemEditProps {
-  item: {
-    id: string;
-    name: string;
-    type: string;
-    category: string;
-  };
+  item: CheckItem;
   onBack: () => void;
-  onSave: (item: any) => void;
+  onSave: (item: CheckItem) => void;
 }
 
 export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
+  // ---- 初期値を既存データからセット ----
   const [itemName, setItemName] = useState(item.name);
-  const [description, setDescription] = useState("");
-  const [itemType, setItemType] = useState(item.type === "数値" ? "number" : item.type === "選択" ? "select" : "text");
-  const [category, setCategory] = useState(item.category === "塗装" ? "painting" : item.category === "外観" ? "appearance" : "dimension");
-  const [tags, setTags] = useState("");
-  
+  const [description, setDescription] = useState(item.description ?? "");
+  const [itemType, setItemType] = useState<CheckItemType>(item.type);
+
+  // category は number | Category | null のどれか想定 → string | null に正規化
+  const [category, setCategory] = useState<string | null>(() => {
+    if (typeof item.category === "number") return String(item.category);
+    if (item.category && typeof item.category === "object" && "id" in item.category) {
+      return String((item.category as any).id);
+    }
+    return null;
+  });
+
+  const [tags, setTags] = useState(item.tags ?? "");
+
   // 数値型設定
-  const [minValue, setMinValue] = useState("0");
-  const [maxValue, setMaxValue] = useState("100");
-  const [unit, setUnit] = useState("μm");
-  const [decimalPlaces, setDecimalPlaces] = useState("2");
-  const [defaultValue, setDefaultValue] = useState("");
-  
+  const [minValue, setMinValue] = useState(
+    item.min_value !== null && item.min_value !== undefined
+      ? String(item.min_value)
+      : ""
+  );
+  const [maxValue, setMaxValue] = useState(
+    item.max_value !== null && item.max_value !== undefined
+      ? String(item.max_value)
+      : ""
+  );
+  const [unit, setUnit] = useState(item.unit ?? "");
+  const [decimalPlaces, setDecimalPlaces] = useState(
+    item.decimal_places !== undefined ? String(item.decimal_places) : "0"
+  );
+  const [defaultValue, setDefaultValue] = useState(
+    item.default_value !== null && item.default_value !== undefined
+      ? String(item.default_value)
+      : ""
+  );
+
   // バリデーション
-  const [isRequired, setIsRequired] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  
+  const [isRequired, setIsRequired] = useState<boolean>(item.required ?? false);
+  const [errorMessage, setErrorMessage] = useState(item.error_message ?? "");
+
   // 参考画像
-  const [allowHandwriting, setAllowHandwriting] = useState(false);
-  const [previewImage, setPreviewImage] = useState("");
+  const [allowHandwriting, setAllowHandwriting] = useState<boolean>(
+    item.allow_handwriting ?? false
+  );
+  const [previewImage, setPreviewImage] = useState(item.reference_image ?? "");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 状態
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -54,25 +88,54 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
     }
   };
 
-  const handleSave = () => {
-    const updatedItem = {
-      id: item.id,
-      itemName,
-      description,
-      itemType,
-      category,
-      tags,
-      minValue,
-      maxValue,
-      unit,
-      decimalPlaces,
-      defaultValue,
-      isRequired,
-      errorMessage,
-      allowHandwriting,
-      referenceImage: previewImage,
-    };
-    onSave(updatedItem);
+  const handleSave = async () => {
+    if (!itemName.trim()) {
+      setError("項目名を入力してください。");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const payload = {
+        name: itemName,
+        description,
+        type: itemType,
+        category: category ? Number(category) : null,
+        required: isRequired,
+        unit: itemType === "number" ? unit : "",
+        options: item.options ?? [],
+
+        tags,
+        min_value:
+          itemType === "number" && minValue !== ""
+            ? parseFloat(minValue)
+            : null,
+        max_value:
+          itemType === "number" && maxValue !== ""
+            ? parseFloat(maxValue)
+            : null,
+        decimal_places:
+          itemType === "number" ? parseInt(decimalPlaces, 10) || 0 : 0,
+        default_value:
+          itemType === "number" && defaultValue !== ""
+            ? parseFloat(defaultValue)
+            : null,
+        error_message: errorMessage,
+        allow_handwriting: allowHandwriting,
+        reference_image: previewImage || "",
+      };
+
+      const res = await api.patch<CheckItem>(`/check-items/${item.id}/`, payload);
+      onSave(res.data);
+      onBack();
+    } catch (err) {
+      console.error(err);
+      setError("チェック項目の更新に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -84,18 +147,23 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
             <ArrowLeft className="w-4 h-4 mr-2" />
             戻る
           </Button>
-          <h2 className="text-gray-900">チェック項目編集</h2>
+          <div>
+            <h2 className="text-gray-900">チェック項目編集</h2>
+            <p className="text-xs text-gray-500 mt-1">ID: {item.id}</p>
+          </div>
         </div>
       </header>
 
       {/* Form Content */}
       <div className="overflow-auto p-6">
         <div className="max-w-4xl mx-auto space-y-6">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
           {/* 基本情報 */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <h3 className="text-gray-900">基本情報</h3>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="item-name">
                   項目名<span className="text-red-600">*</span>
@@ -124,7 +192,12 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
                   <Label htmlFor="item-type">
                     項目タイプ<span className="text-red-600">*</span>
                   </Label>
-                  <Select value={itemType} onValueChange={setItemType}>
+                  <Select
+                    value={itemType}
+                    onValueChange={(value: CheckItemType) =>
+                      setItemType(value)
+                    }
+                  >
                     <SelectTrigger id="item-type">
                       <SelectValue />
                     </SelectTrigger>
@@ -132,22 +205,31 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
                       <SelectItem value="number">数値</SelectItem>
                       <SelectItem value="text">テキスト</SelectItem>
                       <SelectItem value="select">選択</SelectItem>
+                      <SelectItem value="boolean">真偽</SelectItem>
+                      <SelectItem value="photo">写真</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="category">カテゴリ</Label>
-                  <Select value={category} onValueChange={setCategory}>
+                  <Select
+                    value={category ?? undefined}
+                    onValueChange={(value: string) =>
+                      setCategory(value === "none" ? null : value)
+                    }
+                  >
                     <SelectTrigger id="category">
-                      <SelectValue />
+                      <SelectValue placeholder="カテゴリを選択" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="painting">塗装</SelectItem>
-                      <SelectItem value="appearance">外観</SelectItem>
-                      <SelectItem value="dimension">寸法</SelectItem>
-                      <SelectItem value="welding">溶接</SelectItem>
-                      <SelectItem value="strength">強度</SelectItem>
+                      {/* value="" は使わず "none" で null を表現 */}
+                      <SelectItem value="none">未選択</SelectItem>
+                      <SelectItem value="1">塗装</SelectItem>
+                      <SelectItem value="2">外観</SelectItem>
+                      <SelectItem value="3">寸法</SelectItem>
+                      <SelectItem value="4">溶接</SelectItem>
+                      <SelectItem value="5">強度</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -165,12 +247,12 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
             </CardContent>
           </Card>
 
-          {/* 項目タイプ別設定 */}
+          {/* 項目タイプ別設定（数値の場合） */}
           {itemType === "number" && (
             <Card>
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-gray-900">項目タイプ別設定(数値の場合)</h3>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="min-value">最小値</Label>
@@ -204,7 +286,12 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="decimal-places">小数点桁数</Label>
-                    <Select value={decimalPlaces} onValueChange={setDecimalPlaces}>
+                    <Select
+                      value={decimalPlaces}
+                      onValueChange={(value: string) =>
+                        setDecimalPlaces(value)
+                      }
+                    >
                       <SelectTrigger id="decimal-places">
                         <SelectValue />
                       </SelectTrigger>
@@ -236,12 +323,12 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
           <Card>
             <CardContent className="p-6 space-y-4">
               <h3 className="text-gray-900">バリデーションルール</h3>
-              
+
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="required"
                   checked={isRequired}
-                  onCheckedChange={(checked) => setIsRequired(checked as boolean)}
+                  onCheckedChange={(checked) => setIsRequired(!!checked)}
                 />
                 <Label htmlFor="required" className="cursor-pointer">
                   必須
@@ -264,7 +351,7 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
           <Card>
             <CardContent className="p-6 space-y-4">
               <h3 className="text-gray-900">参考画像</h3>
-              
+
               <div className="flex gap-2">
                 <input
                   ref={fileInputRef}
@@ -303,9 +390,14 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
                 <Checkbox
                   id="allow-handwriting"
                   checked={allowHandwriting}
-                  onCheckedChange={(checked) => setAllowHandwriting(checked as boolean)}
+                  onCheckedChange={(checked) =>
+                    setAllowHandwriting(!!checked)
+                  }
                 />
-                <Label htmlFor="allow-handwriting" className="cursor-pointer">
+                <Label
+                  htmlFor="allow-handwriting"
+                  className="cursor-pointer"
+                >
                   手書きコメントを許可
                 </Label>
               </div>
@@ -320,8 +412,8 @@ export function CheckItemEdit({ item, onBack, onSave }: CheckItemEditProps) {
             <Button variant="outline" size="lg" onClick={onBack}>
               キャンセル
             </Button>
-            <Button size="lg" onClick={handleSave}>
-              保存
+            <Button size="lg" onClick={handleSave} disabled={saving}>
+              {saving ? "保存中..." : "保存"}
             </Button>
           </div>
         </div>
