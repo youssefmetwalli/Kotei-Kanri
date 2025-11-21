@@ -1,5 +1,5 @@
 // src/components/CheckItemCreation.tsx
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -15,18 +15,23 @@ import {
 import { Checkbox } from "./ui/checkbox";
 import { ArrowLeft, Upload, Eye } from "lucide-react";
 import { api } from "../lib/api";
-import type { CheckItem, CheckItemType } from "../types/backend";
+import type { CheckItem, CheckItemType, Category } from "../types/backend";
 
 interface CheckItemCreationProps {
   onBack: () => void;
-  onSave: (item: CheckItem) => void;
+  onSaved: (item: CheckItem) => void;
 }
 
-export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
+export function CheckItemCreation({ onBack, onSaved }: CheckItemCreationProps) {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
   const [itemType, setItemType] = useState<CheckItemType>("number");
-  const [category, setCategory] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState<string>("none");
   const [tags, setTags] = useState("");
 
   // 数値型設定
@@ -40,14 +45,28 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
   const [isRequired, setIsRequired] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  // 参考画像
+  // 参考画像（簡易に base64 文字列として保持）
   const [allowHandwriting, setAllowHandwriting] = useState(false);
   const [previewImage, setPreviewImage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 状態
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // カテゴリ一覧取得
+  useEffect(() => {
+    const fetchCategories = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get<Category[]>("/categories/");
+        setCategories(res.data);
+      } catch (err) {
+        console.error(err);
+        setError("カテゴリ一覧の取得に失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -71,11 +90,12 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
     setError(null);
 
     try {
-      const payload = {
+      const payload: any = {
         name: itemName,
         description,
-        type: itemType, // Django側: field名は type
-        category: category ? Number(category) : null,
+        type: itemType,
+        // NOTE: serializer uses category_id for writes
+        category_id: categoryId === "none" ? null : Number(categoryId),
         required: isRequired,
         unit: itemType === "number" ? unit : "",
         options: [],
@@ -101,11 +121,11 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
       };
 
       const res = await api.post<CheckItem>("/check-items/", payload);
-      onSave(res.data);
+      onSaved(res.data);
       onBack();
     } catch (err) {
       console.error(err);
-      setError("チェック項目の保存に失敗しました。");
+      setError("チェック項目の作成に失敗しました。");
     } finally {
       setSaving(false);
     }
@@ -127,6 +147,9 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
       {/* Form Content */}
       <div className="overflow-auto p-6">
         <div className="max-w-4xl mx-auto space-y-6">
+          {loading && (
+            <p className="text-sm text-gray-500">カテゴリを読み込み中です...</p>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           {/* 基本情報 */}
@@ -174,7 +197,7 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
                     <SelectContent>
                       <SelectItem value="number">数値</SelectItem>
                       <SelectItem value="text">テキスト</SelectItem>
-                      <SelectItem value="select">選択肢</SelectItem>
+                      <SelectItem value="select">選択</SelectItem>
                       <SelectItem value="boolean">真偽</SelectItem>
                       <SelectItem value="photo">写真</SelectItem>
                     </SelectContent>
@@ -184,22 +207,19 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
                 <div className="space-y-2">
                   <Label htmlFor="category">カテゴリ</Label>
                   <Select
-                    value={category ?? undefined}
-                    onValueChange={(value: string) =>
-                      setCategory(value === "none" ? null : value)
-                    }
+                    value={categoryId}
+                    onValueChange={(value: string) => setCategoryId(value)}
                   >
                     <SelectTrigger id="category">
                       <SelectValue placeholder="カテゴリを選択" />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* ⬇️ value="" は使用しない。none で null を表現 */}
                       <SelectItem value="none">未選択</SelectItem>
-                      <SelectItem value="1">塗装</SelectItem>
-                      <SelectItem value="2">外観</SelectItem>
-                      <SelectItem value="3">寸法</SelectItem>
-                      <SelectItem value="4">溶接</SelectItem>
-                      <SelectItem value="5">強度</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -217,13 +237,11 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
             </CardContent>
           </Card>
 
-          {/* 数値タイプ設定 */}
+          {/* 項目タイプ別設定（数値の場合） */}
           {itemType === "number" && (
             <Card>
               <CardContent className="p-6 space-y-4">
-                <h3 className="text-gray-900">
-                  項目タイプ別設定(数値の場合)
-                </h3>
+                <h3 className="text-gray-900">項目タイプ別設定(数値の場合)</h3>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -300,9 +318,7 @@ export function CheckItemCreation({ onBack, onSave }: CheckItemCreationProps) {
                 <Checkbox
                   id="required"
                   checked={isRequired}
-                  onCheckedChange={(checked) =>
-                    setIsRequired(!!checked)
-                  }
+                  onCheckedChange={(checked) => setIsRequired(!!checked)}
                 />
                 <Label htmlFor="required" className="cursor-pointer">
                   必須
