@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -138,99 +138,122 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
   };
 
   // ---- Load ProcessSheet detail + execution history from backend ----
-  useEffect(() => {
-    const fetchDetail = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // ProcessSheet detail
-        const sheetRes = await api.get<ProcessSheet>(
-          `/process-sheets/${sheet.id}/`
+  const fetchDetail = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // ProcessSheet detail
+      const sheetRes = await api.get<ProcessSheet>(
+        `/process-sheets/${sheet.id}/`
+      );
+      const ps = sheetRes.data;
+      setBackendSheet(ps);
+
+      const deadlineDate =
+        ps.planned_end?.slice(0, 10) || sheet.deadline || "";
+
+      setSheetData((prev) => ({
+        ...prev,
+        name: ps.name || prev.name,
+        description: ps.notes ?? prev.description,
+        product: ps.project_name || prev.product,
+        assignee: ps.assignee || prev.assignee,
+        lotNumber: ps.lot_number || prev.lotNumber,
+        inspector: ps.inspector || prev.inspector,
+        deadline: deadlineDate,
+        priority: mapPriorityNumberToLabel(ps.priority),
+      }));
+
+      // Execution history for this process sheet
+      const execRes = await api.get<{
+        count?: number;
+        results?: Execution[];
+      }>("/executions/", {
+        params: { process_sheet: sheet.id },
+      });
+
+      const executions: Execution[] =
+        execRes.data.results ?? (execRes.data as any) ?? [];
+
+      const historyRows: ExecutionHistoryRow[] = executions.map((e) => {
+        const { date, time } = formatDateTime(
+          e.finished_at || e.started_at || e.created_at
         );
-        const ps = sheetRes.data;
-        setBackendSheet(ps);
 
-        const deadlineDate =
-          ps.planned_end?.slice(0, 10) || sheet.deadline || "";
-
-        setSheetData((prev) => ({
-          ...prev,
-          name: ps.name || prev.name,
-          description: ps.notes ?? prev.description,
-          product: ps.project_name || prev.product,
-          assignee: ps.assignee || prev.assignee,
-          lotNumber: ps.lot_number || prev.lotNumber,
-          inspector: ps.inspector || prev.inspector,
-          deadline: deadlineDate,
-          priority: mapPriorityNumberToLabel(ps.priority),
-        }));
-
-        // Checklist (if any)
-        if (ps.checklist) {
-          const itemCount =
-            (ps.checklist as any).items?.length ??
-            (ps as any).checklist_items?.length ??
-            0;
-
-          const checklistRow: ChecklistItemRow = {
-            id: ps.checklist.id,
-            name: ps.checklist.name,
-            itemCount,
-            estimatedTime: "-", // no field in backend; can be extended later
-            status: "未実行",
-          };
-          setChecklists([checklistRow]);
-        } else {
-          setChecklists([]);
+        let executorName = "-";
+        if (typeof e.executor === "string") {
+          executorName = e.executor;
+        } else if (
+          e.executor &&
+          typeof e.executor === "object" &&
+          "username" in e.executor
+        ) {
+          executorName = (e.executor as any).username;
         }
 
-        // Execution history for this process sheet
-        const execRes = await api.get<{
-          count?: number;
-          results?: Execution[];
-        }>("/executions/", {
-          params: { process_sheet: sheet.id },
-        });
+        return {
+          id: e.id,
+          date,
+          time,
+          resultLabel: mapExecResultToLabel(e.result),
+          statusLabel: mapExecStatusToLabel(e.status),
+          executor: executorName,
+        };
+      });
 
-        const executions: Execution[] =
-          execRes.data.results ?? (execRes.data as any) ?? [];
+      setExecutionHistory(historyRows);
 
-        const historyRows: ExecutionHistoryRow[] = executions.map((e) => {
-          const { date, time } = formatDateTime(
-            e.finished_at || e.started_at || e.created_at
-          );
+      // Derive checklist status from latest execution
+      let checklistStatus: ChecklistItemRow["status"] = "未実行";
 
-          let executorName = "-";
-          if (typeof e.executor === "string") {
-            executorName = e.executor;
-          } else if (
-            e.executor &&
-            typeof e.executor === "object" &&
-            "username" in e.executor
-          ) {
-            executorName = (e.executor as any).username;
-          }
+      if (executions.length > 0) {
+        const getExecTimestamp = (e: Execution) =>
+          new Date(
+            e.finished_at || e.started_at || e.created_at || ""
+          ).getTime();
 
-          return {
-            id: e.id,
-            date,
-            time,
-            resultLabel: mapExecResultToLabel(e.result),
-            statusLabel: mapExecStatusToLabel(e.status),
-            executor: executorName,
-          };
-        });
+        const latestExec = executions.reduce((latest, current) => {
+          return getExecTimestamp(current) > getExecTimestamp(latest)
+            ? current
+            : latest;
+        }, executions[0]);
 
-        setExecutionHistory(historyRows);
-      } catch (err) {
-        console.error(err);
-        setError("工程シート詳細の取得に失敗しました。");
-      } finally {
-        setLoading(false);
+        if (latestExec.status === "running") {
+          checklistStatus = "進行中";
+        } else if (
+          latestExec.status === "completed" ||
+          latestExec.status === "approved"
+        ) {
+          checklistStatus = "完了";
+        } else {
+          checklistStatus = "未実行";
+        }
       }
-    };
 
-    fetchDetail();
+      // Checklist (if any) with status derived from executions
+      if (ps.checklist) {
+        const itemCount =
+          (ps.checklist as any).items?.length ??
+          (ps as any).checklist_items?.length ??
+          0;
+
+        const checklistRow: ChecklistItemRow = {
+          id: ps.checklist.id,
+          name: ps.checklist.name,
+          itemCount,
+          estimatedTime: "-", // no field in backend; can be extended later
+          status: checklistStatus,
+        };
+        setChecklists([checklistRow]);
+      } else {
+        setChecklists([]);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("工程シート詳細の取得に失敗しました。");
+    } finally {
+      setLoading(false);
+    }
   }, [
     sheet.id,
     sheet.productName,
@@ -240,11 +263,14 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     sheet.inspector,
   ]);
 
-  const handleStartExecution = () => {
-    // TODO: 実際の実行画面への遷移と Execution 作成
-    console.log("実行開始");
+  useEffect(() => {
+    fetchDetail();
+  }, [fetchDetail]);
+
+  const handleStartExecution = async () => {
+    // 実行完了後：準備画面を閉じて最新情報を取得
     setShowExecutionPrep(false);
-    onBack();
+    await fetchDetail();
   };
 
   const handleSave = async () => {
