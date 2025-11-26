@@ -1,22 +1,53 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
-import { 
-  User, 
-  Bell, 
-  Globe, 
-  Shield, 
-  Database, 
+import {
+  User,
+  Bell,
+  Globe,
+  Shield,
+  Database,
   Info,
   Download,
   Upload,
-  Save
+  Save,
 } from "lucide-react";
+import { api } from "../lib/api";
+
+// 型はゆるめにしておいて、バックエンド側の実装に合わせて調整しやすくしておきます
+type SystemSettingsDto = {
+  system_name?: string;
+  language?: string;
+  timezone?: string;
+  date_format?: string;
+
+  user_name?: string;
+  email?: string;
+  role?: string;
+
+  email_notifications?: boolean;
+  task_notifications?: boolean;
+  report_notifications?: boolean;
+  system_alerts?: boolean;
+
+  two_factor_auth?: boolean;
+  session_timeout?: number;
+  password_expiry?: number;
+
+  auto_backup?: boolean;
+  backup_frequency?: string;
+};
 
 export function SystemSettings() {
   // 一般設定
@@ -45,9 +76,114 @@ export function SystemSettings() {
   const [autoBackup, setAutoBackup] = useState(true);
   const [backupFrequency, setBackupFrequency] = useState("daily");
 
-  const handleSave = () => {
-    console.log("Settings saved");
-    // TODO: 実際の保存処理
+  // 通信状態
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // 初回ロードで設定を取得
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // 単一リソース想定のエンドポイント
+        const res = await api.get<SystemSettingsDto>("/system-settings/");
+        const s = res.data || {};
+
+        setSystemName(s.system_name ?? "工程・品質管理システム");
+        setLanguage(s.language ?? "ja");
+        setTimezone(s.timezone ?? "Asia/Tokyo");
+        setDateFormat(s.date_format ?? "YYYY/MM/DD");
+
+        setUserName(s.user_name ?? "山田太郎");
+        setEmail(s.email ?? "yamada@example.com");
+        setRole(s.role ?? "admin");
+
+        setEmailNotifications(
+          typeof s.email_notifications === "boolean"
+            ? s.email_notifications
+            : true
+        );
+        setTaskNotifications(
+          typeof s.task_notifications === "boolean"
+            ? s.task_notifications
+            : true
+        );
+        setReportNotifications(
+          typeof s.report_notifications === "boolean"
+            ? s.report_notifications
+            : false
+        );
+        setSystemAlerts(
+          typeof s.system_alerts === "boolean" ? s.system_alerts : true
+        );
+
+        setTwoFactorAuth(
+          typeof s.two_factor_auth === "boolean" ? s.two_factor_auth : false
+        );
+        setSessionTimeout(
+          s.session_timeout != null ? String(s.session_timeout) : "60"
+        );
+        setPasswordExpiry(
+          s.password_expiry != null ? String(s.password_expiry) : "90"
+        );
+
+        setAutoBackup(
+          typeof s.auto_backup === "boolean" ? s.auto_backup : true
+        );
+        setBackupFrequency(s.backup_frequency ?? "daily");
+      } catch (err) {
+        console.error(err);
+        setError("システム設定の取得に失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSettings();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const payload: SystemSettingsDto = {
+        system_name: systemName,
+        language,
+        timezone,
+        date_format: dateFormat,
+
+        user_name: userName,
+        email,
+        role,
+
+        email_notifications: emailNotifications,
+        task_notifications: taskNotifications,
+        report_notifications: reportNotifications,
+        system_alerts: systemAlerts,
+
+        two_factor_auth: twoFactorAuth,
+        session_timeout: Number(sessionTimeout) || 0,
+        password_expiry: Number(passwordExpiry) || 0,
+
+        auto_backup: autoBackup,
+        backup_frequency: backupFrequency,
+      };
+
+      // 単一リソースなので PUT / PATCH どちらでもOK
+      await api.put("/system-settings/", payload);
+
+      setSaveMessage("設定を保存しました。");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      console.error(err);
+      setError("システム設定の保存に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -57,11 +193,28 @@ export function SystemSettings() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-gray-900">システム設定</h2>
-            <p className="text-sm text-gray-500 mt-1">システムの各種設定を管理</p>
+            <p className="text-sm text-gray-500 mt-1">
+              システムの各種設定を管理
+            </p>
+            {loading && (
+              <p className="text-xs text-gray-500 mt-1">
+                設定を読み込み中です…
+              </p>
+            )}
+            {error && (
+              <p className="text-xs text-red-600 mt-1">
+                {error}
+              </p>
+            )}
+            {saveMessage && (
+              <p className="text-xs text-green-600 mt-1">
+                {saveMessage}
+              </p>
+            )}
           </div>
-          <Button onClick={handleSave}>
+          <Button onClick={handleSave} disabled={saving}>
             <Save className="w-4 h-4 mr-2" />
-            保存
+            {saving ? "保存中..." : "保存"}
           </Button>
         </div>
       </header>
@@ -109,9 +262,15 @@ export function SystemSettings() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Asia/Tokyo">アジア/東京 (JST)</SelectItem>
-                      <SelectItem value="America/New_York">アメリカ/ニューヨーク (EST)</SelectItem>
-                      <SelectItem value="Europe/London">ヨーロッパ/ロンドン (GMT)</SelectItem>
+                      <SelectItem value="Asia/Tokyo">
+                        アジア/東京 (JST)
+                      </SelectItem>
+                      <SelectItem value="America/New_York">
+                        アメリカ/ニューヨーク (EST)
+                      </SelectItem>
+                      <SelectItem value="Europe/London">
+                        ヨーロッパ/ロンドン (GMT)
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -225,7 +384,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>メール通知</Label>
-                  <p className="text-sm text-gray-500">重要な更新をメールで受け取る</p>
+                  <p className="text-sm text-gray-500">
+                    重要な更新をメールで受け取る
+                  </p>
                 </div>
                 <Switch
                   checked={emailNotifications}
@@ -238,7 +399,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>タスク通知</Label>
-                  <p className="text-sm text-gray-500">タスクの割り当てや期限の通知</p>
+                  <p className="text-sm text-gray-500">
+                    タスクの割り当てや期限の通知
+                  </p>
                 </div>
                 <Switch
                   checked={taskNotifications}
@@ -251,7 +414,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>レポート通知</Label>
-                  <p className="text-sm text-gray-500">日次・週次レポートの通知</p>
+                  <p className="text-sm text-gray-500">
+                    日次・週次レポートの通知
+                  </p>
                 </div>
                 <Switch
                   checked={reportNotifications}
@@ -264,7 +429,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>システムアラート</Label>
-                  <p className="text-sm text-gray-500">システムの重要な通知</p>
+                  <p className="text-sm text-gray-500">
+                    システムの重要な通知
+                  </p>
                 </div>
                 <Switch
                   checked={systemAlerts}
@@ -286,7 +453,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>二段階認証</Label>
-                  <p className="text-sm text-gray-500">ログイン時に追加の認証を要求</p>
+                  <p className="text-sm text-gray-500">
+                    ログイン時に追加の認証を要求
+                  </p>
                 </div>
                 <Switch
                   checked={twoFactorAuth}
@@ -298,7 +467,9 @@ export function SystemSettings() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="session-timeout">セッションタイムアウト（分）</Label>
+                  <Label htmlFor="session-timeout">
+                    セッションタイムアウト（分）
+                  </Label>
                   <Input
                     id="session-timeout"
                     type="number"
@@ -308,7 +479,9 @@ export function SystemSettings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="password-expiry">パスワード有効期限（日）</Label>
+                  <Label htmlFor="password-expiry">
+                    パスワード有効期限（日）
+                  </Label>
                   <Input
                     id="password-expiry"
                     type="number"
@@ -332,7 +505,9 @@ export function SystemSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>自動バックアップ</Label>
-                  <p className="text-sm text-gray-500">定期的にデータをバックアップ</p>
+                  <p className="text-sm text-gray-500">
+                    定期的にデータをバックアップ
+                  </p>
                 </div>
                 <Switch
                   checked={autoBackup}
@@ -344,8 +519,13 @@ export function SystemSettings() {
                 <>
                   <Separator />
                   <div className="space-y-2">
-                    <Label htmlFor="backup-frequency">バックアップ頻度</Label>
-                    <Select value={backupFrequency} onValueChange={setBackupFrequency}>
+                    <Label htmlFor="backup-frequency">
+                      バックアップ頻度
+                    </Label>
+                    <Select
+                      value={backupFrequency}
+                      onValueChange={setBackupFrequency}
+                    >
                       <SelectTrigger id="backup-frequency">
                         <SelectValue />
                       </SelectTrigger>
