@@ -41,10 +41,12 @@ export function ChecklistMaster() {
         ]);
 
         const backendChecklists: BackendChecklist[] =
-          clRes.data.results ?? ((clRes.data as unknown) as BackendChecklist[]);
+          clRes.data.results ??
+          ((clRes.data as unknown) as BackendChecklist[]);
 
         const executions: Execution[] =
-          execRes.data.results ?? ((execRes.data as unknown) as Execution[]);
+          execRes.data.results ??
+          ((execRes.data as unknown) as Execution[]);
 
         // usageCount per checklist (how many executions reference it)
         const usageMap: Record<number, number> = {};
@@ -166,6 +168,39 @@ export function ChecklistMaster() {
     }
   };
 
+  // --------- create new checklist ----------
+  const handleCreateChecklist = async () => {
+    try {
+      // 最低限の情報だけで新規チェックリストを作成
+      const res = await api.post<BackendChecklist>("/checklists/", {
+        name: "新しいチェックリスト",
+        description: "",
+        // category_id は任意 / items_write も任意なので省略
+      });
+
+      const newCl = res.data;
+
+      const newRow: ChecklistRow = {
+        id: newCl.id,
+        name: newCl.name,
+        itemCount: Array.isArray((newCl as any).items)
+          ? (newCl as any).items.length
+          : 0,
+        usageCount: 0,
+        createdDate: newCl.created_at ? newCl.created_at.slice(0, 10) : "",
+      };
+
+      // 一覧に追加（先頭に挿入）
+      setChecklists((prev) => [newRow, ...prev]);
+
+      // すぐに詳細編集画面へ遷移
+      setSelectedChecklist(newRow);
+    } catch (err) {
+      console.error(err);
+      alert("チェックリストの作成に失敗しました。");
+    }
+  };
+
   // --------- detail view ----------
   if (selectedChecklist) {
     return (
@@ -223,8 +258,7 @@ export function ChecklistMaster() {
                 <Button
                   size="sm"
                   className="flex-1 md:flex-none"
-                  // TODO: 「新規作成」画面を作る場合はここで遷移
-                  onClick={() => alert("新規作成は後で実装します。")}
+                  onClick={handleCreateChecklist}
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   新規作成
@@ -329,10 +363,7 @@ export function ChecklistMaster() {
             {/* Mobile Cards */}
             <div className="md:hidden divide-y">
               {currentChecklists.map((checklist) => (
-                <div
-                  key={checklist.id}
-                  className="p-4 hover:bg-gray-50"
-                >
+                <div key={checklist.id} className="p-4 hover:bg-gray-50">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="text-gray-900">{checklist.name}</h3>
                     <div className="flex gap-1">
@@ -409,10 +440,7 @@ export function ChecklistMaster() {
                       {page}
                     </Button>
                   ) : (
-                    <span
-                      key={index}
-                      className="px-2 text-gray-500"
-                    >
+                    <span key={index} className="px-2 text-gray-500">
                       {page}
                     </span>
                   )
