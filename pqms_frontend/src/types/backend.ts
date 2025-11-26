@@ -131,3 +131,30 @@ export interface ExecutionItemResult {
   note: string;
   created_at: string;
 }
+
+export type BackupFrequency = "hourly" | "daily" | "weekly" | "monthly";
+
+export interface SystemSettings {
+  id?: number;
+
+  system_name: string;
+  language: string;
+  timezone: string;
+  date_format: string;
+
+  user_name: string;
+  email: string;
+  role: string;
+
+  email_notifications: boolean;
+  task_notifications: boolean;
+  report_notifications: boolean;
+  system_alerts: boolean;
+
+  two_factor_auth: boolean;
+  session_timeout: number;   // minutes
+  password_expiry: number;   // days
+
+  auto_backup: boolean;
+  backup_frequency: BackupFrequency;
+}
