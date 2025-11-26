@@ -311,10 +311,25 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     }
   };
 
+  // Build the sheet props for ExecutionPreparation from latest backend/local data
+  const executionSheetProps = backendSheet
+    ? {
+        id: backendSheet.id,
+        productName: backendSheet.project_name || sheetData.product,
+        lotNumber: backendSheet.lot_number || sheetData.lotNumber,
+        assignee: backendSheet.assignee || sheetData.assignee,
+      }
+    : {
+        id: sheet.id,
+        productName: sheetData.product,
+        lotNumber: sheetData.lotNumber,
+        assignee: sheetData.assignee,
+      };
+
   if (showExecutionPrep) {
     return (
       <ExecutionPreparation
-        sheet={sheet}
+        sheet={executionSheetProps}
         onBack={() => setShowExecutionPrep(false)}
         onStartExecution={handleStartExecution}
       />
