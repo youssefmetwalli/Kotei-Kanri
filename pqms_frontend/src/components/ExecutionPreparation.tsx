@@ -16,7 +16,11 @@ interface ExecutionPreparationProps {
   onStartExecution: () => void;
 }
 
-export function ExecutionPreparation({ sheet, onBack, onStartExecution }: ExecutionPreparationProps) {
+export function ExecutionPreparation({
+  sheet,
+  onBack,
+  onStartExecution,
+}: ExecutionPreparationProps) {
   const [showExecution, setShowExecution] = useState(false);
   const [preparationChecks, setPreparationChecks] = useState([
     { id: 1, label: "必要な機材を準備した", checked: false },
@@ -25,23 +29,33 @@ export function ExecutionPreparation({ sheet, onBack, onStartExecution }: Execut
   ]);
 
   const currentDate = new Date();
-  const formattedDateTime = `${currentDate.getFullYear()}/${String(currentDate.getMonth() + 1).padStart(2, '0')}/${String(currentDate.getDate()).padStart(2, '0')} ${String(currentDate.getHours()).padStart(2, '0')}:${String(currentDate.getMinutes()).padStart(2, '0')}`;
+  const formattedDateTime = `${currentDate.getFullYear()}/${String(
+    currentDate.getMonth() + 1
+  ).padStart(2, "0")}/${String(currentDate.getDate()).padStart(
+    2,
+    "0"
+  )} ${String(currentDate.getHours()).padStart(2, "0")}:${String(
+    currentDate.getMinutes()
+  ).padStart(2, "0")}`;
   const manufacturingDate = "2024/03/10";
 
   const toggleCheck = (id: number) => {
-    setPreparationChecks(preparationChecks.map(check => 
-      check.id === id ? { ...check, checked: !check.checked } : check
-    ));
+    setPreparationChecks((prev) =>
+      prev.map((check) =>
+        check.id === id ? { ...check, checked: !check.checked } : check
+      )
+    );
   };
 
-  const allChecked = preparationChecks.every(check => check.checked);
+  const allChecked = preparationChecks.every((check) => check.checked);
 
   const handleStartExecution = () => {
     setShowExecution(true);
   };
 
   const handleExecutionComplete = () => {
-    // TODO: 実行結果確認画面への遷移
+    // 実行画面を閉じてから、親コンポーネントへ「完了」を通知
+    setShowExecution(false);
     onStartExecution();
   };
 
@@ -80,7 +94,9 @@ export function ExecutionPreparation({ sheet, onBack, onStartExecution }: Execut
             <CardContent className="p-8 space-y-8">
               {/* Title */}
               <div>
-                <h1 className="text-gray-900">{sheet.productName} 初期ロット検査</h1>
+                <h1 className="text-gray-900">
+                  {sheet.productName} 初期ロット検査
+                </h1>
               </div>
 
               {/* Product Information */}
@@ -107,11 +123,15 @@ export function ExecutionPreparation({ sheet, onBack, onStartExecution }: Execut
                 <h3 className="text-gray-900">作業情報</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex">
-                    <span className="text-gray-600 w-32">作業チェックリスト:</span>
+                    <span className="text-gray-600 w-32">
+                      作業チェックリスト:
+                    </span>
                     <span className="text-gray-900">3つ</span>
                   </div>
                   <div className="flex">
-                    <span className="text-gray-600 w-32">推定作業時間:</span>
+                    <span className="text-gray-600 w-32">
+                      推定作業時間:
+                    </span>
                     <span className="text-gray-900">45分</span>
                   </div>
                 </div>
