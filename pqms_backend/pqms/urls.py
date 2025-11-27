@@ -7,7 +7,7 @@ from rest_framework import routers
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from accounts.api import router as accounts_router
-from master.api import router as master_router
+from master.api import router as master_router, SystemSettingsView
 from checklists.api import router as checklists_router
 from processes.api import router as processes_router
 from executions.api import router as executions_router
@@ -24,4 +24,5 @@ urlpatterns = [
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema')),
     path('api/', include(router.urls)),
     path('api/auth/', include('accounts.auth_urls')),
+    path('api/system-settings/', SystemSettingsView.as_view(), name='system-settings'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
