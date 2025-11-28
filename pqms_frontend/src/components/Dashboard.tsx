@@ -30,6 +30,24 @@ type DashboardStats = {
   };
 };
 
+// DRF の List API も、非ページネートの配列レスポンスも両方扱うためのユーティリティ
+type MaybePaginated<T> =
+  | {
+      results: T[];
+      count?: number;
+      next?: string | null;
+      previous?: string | null;
+    }
+  | T[];
+
+function normalizeListResponse<T>(data: MaybePaginated<T>): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray((data as any).results)) {
+    return (data as any).results as T[];
+  }
+  return [];
+}
+
 export function Dashboard() {
   const currentDate = new Date();
   const dateString = `${currentDate.getFullYear()}年${
@@ -45,106 +63,153 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [execRes, procRes, itemRes] = await Promise.all([
-          api.get("/executions/"),
-          api.get("/process-sheets/"),
-          api.get("/execution-item-results/"),
-        ]);
+  // 生データも保持しておく（将来 Quick Actions 等で利用するため）
+  const [executions, setExecutions] = useState<Execution[]>([]);
+  const [processSheets, setProcessSheets] = useState<ProcessSheet[]>([]);
+  const [itemResults, setItemResults] = useState<ExecutionItemResult[]>([]);
 
-        const executions: Execution[] =
-          execRes.data.results ?? execRes.data ?? [];
-        const processSheets: ProcessSheet[] =
-          procRes.data.results ?? procRes.data ?? [];
-        const itemResults: ExecutionItemResult[] =
-          itemRes.data.results ?? itemRes.data ?? [];
+  // ダッシュボード用のデータ取得ロジックを関数として切り出し
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [execRes, procRes, itemRes] = await Promise.all([
+        api.get<MaybePaginated<Execution>>("/executions/"),
+        api.get<MaybePaginated<ProcessSheet>>("/process-sheets/"),
+        api.get<MaybePaginated<ExecutionItemResult>>(
+          "/execution-item-results/"
+        ),
+      ]);
 
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth();
+      const executionsData = normalizeListResponse(execRes.data);
+      const processSheetsData = normalizeListResponse(procRes.data);
+      const itemResultsData = normalizeListResponse(itemRes.data);
 
-        // 今月の検査実施数
-        const monthlyExecutionCount = executions.filter((e) => {
+      setExecutions(executionsData);
+      setProcessSheets(processSheetsData);
+      setItemResults(itemResultsData);
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth();
+
+      // 今月の検査実施数
+      const monthlyExecutionCount = executionsData.filter((e) => {
+        const dateStr = e.started_at ?? e.created_at;
+        if (!dateStr) return false;
+        const d = new Date(dateStr);
+        return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+      }).length;
+
+      // 合格率 & 品質内訳
+      const executionsWithResult = executionsData.filter((e) => !!e.result);
+      const passCount = executionsWithResult.filter(
+        (e) => e.result === "pass"
+      ).length;
+      const warnCount = executionsWithResult.filter(
+        (e) => e.result === "warn"
+      ).length;
+      const failCount = executionsWithResult.filter(
+        (e) => e.result === "fail"
+      ).length;
+      const totalWithResult = executionsWithResult.length || 1;
+      const passRate = (passCount / totalWithResult) * 100;
+
+      // 要対応の工程 = 完了以外
+      const alertProcessCount = processSheetsData.filter(
+        (p) => p.status !== "done"
+      ).length;
+
+      // 要対応項目 = NG / SKIP
+      const alertItemCount = itemResultsData.filter(
+        (i) => i.status === "NG" || i.status === "SKIP"
+      ).length;
+
+      // 過去7週間の簡易週次カウント
+      const weeklyExecutionCounts: { label: string; count: number }[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const start = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate()
+        );
+        start.setDate(start.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+
+        const count = executionsData.filter((e) => {
           const dateStr = e.started_at ?? e.created_at;
           if (!dateStr) return false;
           const d = new Date(dateStr);
-          return (
-            d.getFullYear() === currentYear && d.getMonth() === currentMonth
-          );
+          return d >= start && d < end;
         }).length;
 
-        // 合格率 & 品質内訳
-        const executionsWithResult = executions.filter((e) => !!e.result);
-        const passCount = executionsWithResult.filter(
-          (e) => e.result === "pass"
-        ).length;
-        const warnCount = executionsWithResult.filter(
-          (e) => e.result === "warn"
-        ).length;
-        const failCount = executionsWithResult.filter(
-          (e) => e.result === "fail"
-        ).length;
-        const totalWithResult = executionsWithResult.length || 1;
-        const passRate = (passCount / totalWithResult) * 100;
-
-        // 要対応の工程 = 完了以外
-        const alertProcessCount = processSheets.filter(
-          (p) => p.status !== "done"
-        ).length;
-
-        // 要対応項目 = NG / SKIP
-        const alertItemCount = itemResults.filter(
-          (i) => i.status === "NG" || i.status === "SKIP"
-        ).length;
-
-        // 過去7週間の簡易週次カウント
-        const weeklyExecutionCounts: { label: string; count: number }[] = [];
-        for (let i = 6; i >= 0; i--) {
-          const start = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate()
-          );
-          start.setDate(start.getDate() - i * 7);
-          const end = new Date(start);
-          end.setDate(end.getDate() + 7);
-
-          const count = executions.filter((e) => {
-            const dateStr = e.started_at ?? e.created_at;
-            if (!dateStr) return false;
-            const d = new Date(dateStr);
-            return d >= start && d < end;
-          }).length;
-
-          const label = `${start.getMonth() + 1}/${start.getDate()}週`;
-          weeklyExecutionCounts.push({ label, count });
-        }
-
-        setStats({
-          monthlyExecutionCount,
-          passRate,
-          alertProcessCount,
-          alertItemCount,
-          weeklyExecutionCounts,
-          qualityBreakdown: { pass: passCount, warn: warnCount, fail: failCount },
-        });
-      } catch (err) {
-        console.error(err);
-        setError("ダッシュボード情報の取得に失敗しました。");
-      } finally {
-        setLoading(false);
+        const label = `${start.getMonth() + 1}/${start.getDate()}週`;
+        weeklyExecutionCounts.push({ label, count });
       }
-    };
 
+      setStats({
+        monthlyExecutionCount,
+        passRate,
+        alertProcessCount,
+        alertItemCount,
+        weeklyExecutionCounts,
+        qualityBreakdown: {
+          pass: passCount,
+          warn: warnCount,
+          fail: failCount,
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      setError("ダッシュボード情報の取得に失敗しました。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
 
+  // 例：Quick Action から「新規検査開始」を実データとつなげるためのハンドラ
+  // ※ 実際には CheckSheetExecution 画面に遷移して詳細入力する想定だと思うので、
+  //   ここでは「チェックリスト付きの工程表がなければエラーを出す」
+  //   「あれば Execution を POST する」形のサンプルを用意してあります。
+  const handleStartNewExecution = async () => {
+    try {
+      setError(null);
+
+      // checklist が紐付いた工程表を探す
+      const targetSheet = processSheets.find((ps) => ps.checklist !== null);
+
+      if (!targetSheet || !targetSheet.checklist) {
+        setError(
+          "検査を開始する前に、チェックリストが紐付いた工程表を作成してください。"
+        );
+        return;
+      }
+
+      const checklistId = targetSheet.checklist.id;
+
+      // 実際に Execution を作成（CheckSheetExecution と同じバックエンド仕様に合わせる）
+      await api.post<Execution>("/executions/", {
+        process_sheet_id: targetSheet.id,
+        checklist_id: checklistId,
+        status: "running",
+        result: "",
+      });
+
+      // 作成後にダッシュボード情報を再取得
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+      setError("新規検査の開始に失敗しました。");
+    }
+  };
+
   // ローディング表示
-  if (loading) {
+  if (loading && !stats) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <p className="text-gray-500">ダッシュボードを読み込み中...</p>
@@ -153,15 +218,22 @@ export function Dashboard() {
   }
 
   // エラー表示
-  if (error || !stats) {
+  if (error && !stats) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center space-y-3">
-          <p className="text-red-600">{error ?? "データが取得できませんでした。"}</p>
-          <Button onClick={() => window.location.reload()}>再読み込み</Button>
+          <p className="text-red-600">
+            {error ?? "データが取得できませんでした。"}
+          </p>
+          <Button onClick={fetchData}>再読み込み</Button>
         </div>
       </div>
     );
+  }
+
+  if (!stats) {
+    // ここに来ることはほぼ無い想定だが、念のため
+    return null;
   }
 
   const {
@@ -172,6 +244,11 @@ export function Dashboard() {
     weeklyExecutionCounts,
     qualityBreakdown,
   } = stats;
+
+  const isCompletelyEmpty =
+    executions.length === 0 &&
+    processSheets.length === 0 &&
+    itemResults.length === 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -186,6 +263,19 @@ export function Dashboard() {
       </header>
 
       <div className="p-6 space-y-6">
+        {/* まだ完全にデータが無いときのガイド */}
+        {isCompletelyEmpty && (
+          <Card className="border-dashed border-gray-300 bg-white">
+            <CardContent className="p-6 text-sm text-gray-600 space-y-2">
+              <p>まだデータがありません。</p>
+              <p>
+                まずは「マスタ管理」や「チェックリスト」画面からチェックリストと工程表を作成し、
+                その後「新規検査開始」から検査を登録してください。
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Alert Banner */}
         <Card className="border-orange-200 bg-orange-50">
           <CardContent className="p-4">
@@ -198,8 +288,8 @@ export function Dashboard() {
                     : "対応が必要な工程はありません"}
                 </span>
               </div>
-              <Button size="sm" variant="outline">
-                詳細を見る
+              <Button size="sm" variant="outline" onClick={fetchData}>
+                再読み込み
               </Button>
             </div>
           </CardContent>
@@ -270,7 +360,9 @@ export function Dashboard() {
                       {alertItemCount}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-600">要対応項目 (NG/スキップ)</p>
+                  <p className="text-sm text-gray-600">
+                    要対応項目 (NG/スキップ)
+                  </p>
                 </div>
                 <div className="bg-red-50 p-2 rounded">
                   <AlertCircle className="w-5 h-5 text-red-600" />
@@ -280,11 +372,16 @@ export function Dashboard() {
           </Card>
         </div>
 
-        {/* Quick Actions (UI only) */}
+        {/* Quick Actions */}
         <div>
           <h3 className="text-gray-900 mb-4">クイックアクション</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button variant="outline" className="h-auto py-6 flex-col gap-2">
+            <Button
+              variant="outline"
+              className="h-auto py-6 flex-col gap-2"
+              onClick={handleStartNewExecution}
+              disabled={loading}
+            >
               <Plus className="w-5 h-5" />
               <span className="text-sm">新規検査開始</span>
             </Button>
@@ -344,8 +441,8 @@ export function Dashboard() {
           <CardContent>
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
-                合格 {qualityBreakdown.pass}件 / 要注意 {qualityBreakdown.warn}件 / 不合格{" "}
-                {qualityBreakdown.fail}件
+                合格 {qualityBreakdown.pass}件 / 要注意{" "}
+                {qualityBreakdown.warn}件 / 不合格 {qualityBreakdown.fail}件
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                 <div className="p-4 bg-green-50 rounded-lg">
@@ -376,6 +473,11 @@ export function Dashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {/* 下部にエラー表示（データは表示できているが、何かの操作で失敗した場合） */}
+        {error && (
+          <p className="text-sm text-red-600 text-right">{error}</p>
+        )}
       </div>
     </div>
   );
