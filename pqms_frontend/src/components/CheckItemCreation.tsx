@@ -1,4 +1,3 @@
-// src/components/CheckItemCreation.tsx
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
@@ -56,8 +55,18 @@ export function CheckItemCreation({ onBack, onSaved }: CheckItemCreationProps) {
       setLoading(true);
       setError(null);
       try {
-        const res = await api.get<Category[]>("/categories/");
-        setCategories(res.data);
+        const res = await api.get<
+          { count?: number; results?: Category[] } | Category[]
+        >("/categories/");
+
+        const data = res.data as any;
+        const list: Category[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data.results)
+          ? data.results
+          : [];
+
+        setCategories(list);
       } catch (err) {
         console.error(err);
         setError("カテゴリ一覧の取得に失敗しました。");
@@ -187,9 +196,7 @@ export function CheckItemCreation({ onBack, onSaved }: CheckItemCreationProps) {
                   </Label>
                   <Select
                     value={itemType}
-                    onValueChange={(value: CheckItemType) =>
-                      setItemType(value)
-                    }
+                    onValueChange={(value: CheckItemType) => setItemType(value)}
                   >
                     <SelectTrigger id="item-type">
                       <SelectValue />
@@ -278,9 +285,7 @@ export function CheckItemCreation({ onBack, onSaved }: CheckItemCreationProps) {
                     <Label htmlFor="decimal-places">小数点桁数</Label>
                     <Select
                       value={decimalPlaces}
-                      onValueChange={(value: string) =>
-                        setDecimalPlaces(value)
-                      }
+                      onValueChange={(value: string) => setDecimalPlaces(value)}
                     >
                       <SelectTrigger id="decimal-places">
                         <SelectValue />
@@ -380,14 +385,9 @@ export function CheckItemCreation({ onBack, onSaved }: CheckItemCreationProps) {
                 <Checkbox
                   id="allow-handwriting"
                   checked={allowHandwriting}
-                  onCheckedChange={(checked) =>
-                    setAllowHandwriting(!!checked)
-                  }
+                  onCheckedChange={(checked) => setAllowHandwriting(!!checked)}
                 />
-                <Label
-                  htmlFor="allow-handwriting"
-                  className="cursor-pointer"
-                >
+                <Label htmlFor="allow-handwriting" className="cursor-pointer">
                   手書きコメントを許可
                 </Label>
               </div>
