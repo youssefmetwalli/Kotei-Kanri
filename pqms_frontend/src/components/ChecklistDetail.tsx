@@ -1,3 +1,4 @@
+// src/components/ChecklistDetail.tsx
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
@@ -20,8 +21,26 @@ import type {
   CheckItem,
 } from "../types/backend";
 
+type MaybePaginated<T> =
+  | T[]
+  | {
+      results?: T[];
+      count?: number;
+      next?: string | null;
+      previous?: string | null;
+    };
+
+function normalizeListResponse<T>(data: MaybePaginated<T>): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results!;
+  return [];
+}
+
 interface CheckItemRow {
-  id: number;
+  // checklist_items.id (may be null for newly added items)
+  checklistItemId: number | null;
+  // master CheckItem id
+  checkItemId: number;
   name: string;
   typeLabel: string;
   required: boolean;
@@ -61,11 +80,13 @@ export function ChecklistDetail({
 }: ChecklistDetailProps) {
   const [listName, setListName] = useState(checklist.name);
   const [description, setDescription] = useState<string>("");
-  // store category as string id or null
   const [categoryId, setCategoryId] = useState<string | null>(null);
-  const [estimatedTime, setEstimatedTime] = useState<string>(""); // frontend-only for now
+  const [estimatedTime, setEstimatedTime] = useState<string>(""); 
 
+  // current items that belong to this checklist
   const [checkItems, setCheckItems] = useState<CheckItemRow[]>([]);
+  // master data
+  const [allCheckItems, setAllCheckItems] = useState<CheckItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
   const [backendChecklist, setBackendChecklist] =
@@ -75,23 +96,21 @@ export function ChecklistDetail({
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // ---- Load checklist detail + categories from backend ----
+  // Add-item modal state
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [selectedToAdd, setSelectedToAdd] = useState<Set<number>>(new Set());
+
+  // ---- Load checklist detail + categories + all check items ----
   useEffect(() => {
     const fetchDetail = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [checklistRes, categoriesRes] = await Promise.all([
+        const [checklistRes, categoriesRes, checkItemsRes] = await Promise.all([
           api.get<BackendChecklist>(`/checklists/${checklist.id}/`),
-          api.get<{ count?: number; results?: Category[] } | Category[]>(
-            "/categories/"
-          ),
+          api.get<MaybePaginated<Category>>("/categories/"),
+          api.get<MaybePaginated<CheckItem>>("/check-items/"),
         ]);
-
-        console.log("ChecklistDetail fetched:", {
-          checklist: checklistRes.data,
-          categories: categoriesRes.data,
-        });
 
         const bc = checklistRes.data;
         setBackendChecklist(bc);
@@ -103,7 +122,10 @@ export function ChecklistDetail({
         if (bc.category) {
           if (typeof bc.category === "number") {
             setCategoryId(String(bc.category));
-          } else if (typeof bc.category === "object" && "id" in bc.category) {
+          } else if (
+            typeof bc.category === "object" &&
+            "id" in bc.category
+          ) {
             setCategoryId(String((bc.category as any).id));
           } else {
             setCategoryId(null);
@@ -121,7 +143,11 @@ export function ChecklistDetail({
           : [];
         setCategories(cats);
 
-        // checklist items - normalize to array
+        // all master check items (for "add item" modal)
+        const allItems = normalizeListResponse<CheckItem>(checkItemsRes.data);
+        setAllCheckItems(allItems);
+
+        // checklist items from bc.items
         const items: BackendChecklistItem[] = Array.isArray((bc as any).items)
           ? ((bc as any).items as BackendChecklistItem[])
           : [];
@@ -130,9 +156,13 @@ export function ChecklistDetail({
           let name = `項目 #${ci.check_item}`;
           let typeLabel = "テキスト";
           let checkItem: CheckItem | null = null;
+          let checkItemId: number;
 
           if (typeof ci.check_item === "object") {
             checkItem = ci.check_item as any;
+            checkItemId = checkItem!.id;
+          } else {
+            checkItemId = ci.check_item as number;
           }
 
           if (checkItem) {
@@ -141,7 +171,8 @@ export function ChecklistDetail({
           }
 
           return {
-            id: ci.id,
+            checklistItemId: ci.id,
+            checkItemId,
             name,
             typeLabel,
             required: ci.required,
@@ -160,25 +191,70 @@ export function ChecklistDetail({
     fetchDetail();
   }, [checklist.id]);
 
-  const handleDeleteItem = async (id: number) => {
-    try {
-      // optimistic update
-      setCheckItems((prev) => prev.filter((item) => item.id !== id));
-      await api.delete(`/checklist-items/${id}/`);
-    } catch (err) {
-      console.error(err);
-      setError("チェック項目の削除に失敗しました。");
-    }
+  // ---------- checklist items operations ----------
+
+  const handleOpenAddModal = () => {
+    setSelectedToAdd(new Set());
+    setError(null);
+    setAddModalOpen(true);
   };
 
-  // NOTE: 追加は CheckItem と ChecklistItem を紐づける UI が必要なので、
-  // ここではまだバックエンド連携せずに無効化しています。
-  const handleAddItem = () => {
-    // ここでモーダルを開いて既存 CheckItem 選択 → /checklist-items/ POST などに拡張可能
-    setError(
-      "チェック項目の追加は、別画面（チェック項目マスタ）で行ってください。"
+  const toggleSelectToAdd = (id: number) => {
+    setSelectedToAdd((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirmAddItems = () => {
+    if (selectedToAdd.size === 0) {
+      setAddModalOpen(false);
+      return;
+    }
+
+    const existingIds = new Set(checkItems.map((ci) => ci.checkItemId));
+    const selected = allCheckItems.filter(
+      (ci) => selectedToAdd.has(ci.id) && !existingIds.has(ci.id)
+    );
+
+    if (selected.length === 0) {
+      setAddModalOpen(false);
+      return;
+    }
+
+    const newRows: CheckItemRow[] = selected.map((ci) => ({
+      checklistItemId: null,
+      checkItemId: ci.id,
+      name: ci.name,
+      typeLabel: mapCheckItemTypeToLabel(ci.type),
+      required: ci.required ?? false,
+    }));
+
+    setCheckItems((prev) => [...prev, ...newRows]);
+    setAddModalOpen(false);
+  };
+
+  const moveItem = (index: number, direction: "up" | "down") => {
+    setCheckItems((prev) => {
+      const next = [...prev];
+      const newIndex = direction === "up" ? index - 1 : index + 1;
+      if (newIndex < 0 || newIndex >= next.length) return prev;
+      const tmp = next[index];
+      next[index] = next[newIndex];
+      next[newIndex] = tmp;
+      return next;
+    });
+  };
+
+  const handleDeleteItem = (checkItemId: number) => {
+    setCheckItems((prev) =>
+      prev.filter((item) => item.checkItemId !== checkItemId)
     );
   };
+
+
 
   const handleSave = async () => {
     if (!backendChecklist) return;
@@ -192,13 +268,23 @@ export function ChecklistDetail({
     setSaveMessage(null);
 
     try {
+      const itemsPayload = checkItems.map((item, index) => ({
+        check_item_id: item.checkItemId,
+        required: item.required,
+        instruction: "",
+        unit: "",
+        options: [],
+      }));
+
       const payload: Partial<BackendChecklist> & {
-        category?: number | null;
+        category_id?: number | null;
+        items_write?: any[];
       } = {
         name: listName,
         description,
-        category: categoryId ? Number(categoryId) : null,
-        // estimatedTime はバックエンドにフィールドがないため、ここでは送信しない
+        category_id: categoryId ? Number(categoryId) : null,
+        items_write: itemsPayload,
+        // estimatedTime is frontend-only for now
       };
 
       const res = await api.patch<BackendChecklist>(
@@ -216,6 +302,12 @@ export function ChecklistDetail({
       setSaving(false);
     }
   };
+
+  // ---------- render ----------
+
+  const availableForAdd = allCheckItems.filter(
+    (ci) => !checkItems.some((row) => row.checkItemId === ci.id)
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -248,7 +340,7 @@ export function ChecklistDetail({
             <p className="text-sm text-green-600">{saveMessage}</p>
           )}
 
-          {/* 基本情報 */}
+          {/* Basic info */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <h3 className="text-gray-900">基本情報</h3>
@@ -291,7 +383,6 @@ export function ChecklistDetail({
                       <SelectValue placeholder="カテゴリを選択" />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* value="" は使わず "none" で未選択を表現 */}
                       <SelectItem value="none">未選択</SelectItem>
                       {categories.map((c) => (
                         <SelectItem key={c.id} value={String(c.id)}>
@@ -319,18 +410,21 @@ export function ChecklistDetail({
             </CardContent>
           </Card>
 
-          {/* チェック項目 */}
+          {/* Checklist items */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-gray-900">
                   チェック項目（{checkItems.length}項目）
                 </h3>
-                <Button size="sm" onClick={handleAddItem}>
+                <Button size="sm" onClick={handleOpenAddModal}>
                   <Plus className="w-4 h-4 mr-2" />
                   チェック項目を追加
                 </Button>
               </div>
+              <p className="text-xs text-gray-500">
+                ※ 項目の追加・並び順の変更後は、右下の「保存」を押して確定してください
+              </p>
 
               {/* Desktop Table */}
               <div className="hidden md:block overflow-x-auto border rounded-lg">
@@ -349,14 +443,17 @@ export function ChecklistDetail({
                       <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wider w-16">
                         必須
                       </th>
-                      <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wider w-32">
+                      <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wider w-40">
                         アクション
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {checkItems.map((item, index) => (
-                      <tr key={item.id} className="border-b hover:bg-gray-50">
+                      <tr
+                        key={item.checkItemId}
+                        className="border-b hover:bg-gray-50"
+                      >
                         <td className="px-4 py-3 text-sm text-gray-900">
                           {index + 1}
                         </td>
@@ -371,13 +468,28 @@ export function ChecklistDetail({
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1">
-                            <Button variant="outline" size="sm" disabled>
-                              編集
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => moveItem(index, "up")}
+                              disabled={index === 0}
+                            >
+                              ↑
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDeleteItem(item.id)}
+                              onClick={() => moveItem(index, "down")}
+                              disabled={index === checkItems.length - 1}
+                            >
+                              ↓
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleDeleteItem(item.checkItemId)
+                              }
                             >
                               削除
                             </Button>
@@ -385,6 +497,16 @@ export function ChecklistDetail({
                         </td>
                       </tr>
                     ))}
+                    {checkItems.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-4 py-6 text-sm text-gray-500 text-center"
+                        >
+                          チェック項目がありません。右上の「チェック項目を追加」から追加してください。
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -392,7 +514,10 @@ export function ChecklistDetail({
               {/* Mobile Cards */}
               <div className="md:hidden space-y-3">
                 {checkItems.map((item, index) => (
-                  <div key={item.id} className="border rounded-lg p-4 bg-white">
+                  <div
+                    key={item.checkItemId}
+                    className="border rounded-lg p-4 bg-white"
+                  >
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-500">
@@ -401,13 +526,28 @@ export function ChecklistDetail({
                         <span className="text-gray-900">{item.name}</span>
                       </div>
                       <div className="flex gap-1">
-                        <Button variant="outline" size="sm" disabled>
-                          編集
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => moveItem(index, "up")}
+                          disabled={index === 0}
+                        >
+                          ↑
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleDeleteItem(item.id)}
+                          onClick={() => moveItem(index, "down")}
+                          disabled={index === checkItems.length - 1}
+                        >
+                          ↓
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            handleDeleteItem(item.checkItemId)
+                          }
                         >
                           削除
                         </Button>
@@ -416,7 +556,9 @@ export function ChecklistDetail({
                     <div className="flex gap-4 text-sm">
                       <div>
                         <span className="text-gray-500">タイプ: </span>
-                        <span className="text-gray-900">{item.typeLabel}</span>
+                        <span className="text-gray-900">
+                          {item.typeLabel}
+                        </span>
                       </div>
                       <div>
                         <span className="text-gray-500">必須: </span>
@@ -427,6 +569,11 @@ export function ChecklistDetail({
                     </div>
                   </div>
                 ))}
+                {checkItems.length === 0 && (
+                  <div className="p-4 text-sm text-gray-500 text-center">
+                    チェック項目がありません。右上の「チェック項目を追加」から追加してください。
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -446,6 +593,68 @@ export function ChecklistDetail({
           </div>
         </div>
       </div>
+
+      {/* Simple "Add Items" modal */}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-xl p-6 space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              チェック項目を追加
+            </h3>
+            {availableForAdd.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                追加可能なチェック項目がありません。先に「チェック項目マスタ」で作成してください。
+              </p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto border rounded">
+                {availableForAdd.map((ci) => (
+                  <label
+                    key={ci.id}
+                    className="flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {ci.name}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {mapCheckItemTypeToLabel(ci.type)} /{" "}
+                        {typeof ci.category === "object" &&
+                        ci.category &&
+                        "name" in ci.category
+                          ? (ci.category as any).name
+                          : ""}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={selectedToAdd.has(ci.id)}
+                      onChange={() => toggleSelectToAdd(ci.id)}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAddModalOpen(false)}
+              >
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleConfirmAddItems}
+                disabled={availableForAdd.length === 0}
+              >
+                追加
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
