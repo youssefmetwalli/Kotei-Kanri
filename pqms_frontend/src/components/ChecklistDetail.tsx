@@ -1,4 +1,3 @@
-// src/components/ChecklistDetail.tsx
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
