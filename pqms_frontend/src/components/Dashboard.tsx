@@ -30,7 +30,6 @@ type DashboardStats = {
   };
 };
 
-// DRF の List API も、非ページネートの配列レスポンスも両方扱うためのユーティリティ
 type MaybePaginated<T> =
   | {
       results: T[];
@@ -40,6 +39,11 @@ type MaybePaginated<T> =
     }
   | T[];
 
+// prop to allow navigation from Dashboard (App.tsx will pass setActiveTab)
+type DashboardProps = {
+  onNavigate?: (tabId: string) => void;
+};
+
 function normalizeListResponse<T>(data: MaybePaginated<T>): T[] {
   if (Array.isArray(data)) return data;
   if (data && Array.isArray((data as any).results)) {
@@ -48,7 +52,7 @@ function normalizeListResponse<T>(data: MaybePaginated<T>): T[] {
   return [];
 }
 
-export function Dashboard() {
+export function Dashboard({ onNavigate }: DashboardProps) {
   const currentDate = new Date();
   const dateString = `${currentDate.getFullYear()}年${
     currentDate.getMonth() + 1
@@ -63,12 +67,11 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 生データも保持しておく（将来 Quick Actions 等で利用するため）
+  // keep raw data too
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [processSheets, setProcessSheets] = useState<ProcessSheet[]>([]);
   const [itemResults, setItemResults] = useState<ExecutionItemResult[]>([]);
 
-  // ダッシュボード用のデータ取得ロジックを関数として切り出し
   const fetchData = async () => {
     setLoading(true);
     setError(null);
@@ -93,7 +96,7 @@ export function Dashboard() {
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth();
 
-      // 今月の検査実施数
+      // monthly execution count
       const monthlyExecutionCount = executionsData.filter((e) => {
         const dateStr = e.started_at ?? e.created_at;
         if (!dateStr) return false;
@@ -101,7 +104,7 @@ export function Dashboard() {
         return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
       }).length;
 
-      // 合格率 & 品質内訳
+      // pass rate & quality breakdown
       const executionsWithResult = executionsData.filter((e) => !!e.result);
       const passCount = executionsWithResult.filter(
         (e) => e.result === "pass"
@@ -115,17 +118,17 @@ export function Dashboard() {
       const totalWithResult = executionsWithResult.length || 1;
       const passRate = (passCount / totalWithResult) * 100;
 
-      // 要対応の工程 = 完了以外
+      // processes needing attention = not done
       const alertProcessCount = processSheetsData.filter(
         (p) => p.status !== "done"
       ).length;
 
-      // 要対応項目 = NG / SKIP
+      // items needing attention = NG or SKIP
       const alertItemCount = itemResultsData.filter(
         (i) => i.status === "NG" || i.status === "SKIP"
       ).length;
 
-      // 過去7週間の簡易週次カウント
+      // weekly counts (last 7 weeks, simple)
       const weeklyExecutionCounts: { label: string; count: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const start = new Date(
@@ -172,15 +175,11 @@ export function Dashboard() {
     fetchData();
   }, []);
 
-  // 例：Quick Action から「新規検査開始」を実データとつなげるためのハンドラ
-  // ※ 実際には CheckSheetExecution 画面に遷移して詳細入力する想定だと思うので、
-  //   ここでは「チェックリスト付きの工程表がなければエラーを出す」
-  //   「あれば Execution を POST する」形のサンプルを用意してあります。
+  // keep the existing POST logic (creates an Execution when possible)
   const handleStartNewExecution = async () => {
     try {
       setError(null);
 
-      // checklist が紐付いた工程表を探す
       const targetSheet = processSheets.find((ps) => ps.checklist !== null);
 
       if (!targetSheet || !targetSheet.checklist) {
@@ -192,7 +191,6 @@ export function Dashboard() {
 
       const checklistId = targetSheet.checklist.id;
 
-      // 実際に Execution を作成（CheckSheetExecution と同じバックエンド仕様に合わせる）
       await api.post<Execution>("/executions/", {
         process_sheet_id: targetSheet.id,
         checklist_id: checklistId,
@@ -200,7 +198,6 @@ export function Dashboard() {
         result: "",
       });
 
-      // 作成後にダッシュボード情報を再取得
       await fetchData();
     } catch (err) {
       console.error(err);
@@ -208,7 +205,24 @@ export function Dashboard() {
     }
   };
 
-  // ローディング表示
+  // wrapper that also navigates to the execution screen
+  const handleStartNewExecutionClick = async () => {
+    await handleStartNewExecution();
+    // go to the "実行" tab
+    onNavigate?.("quality");
+  };
+
+  // navigate to checklist screen
+  const handleCreateChecklistClick = () => {
+    if (onNavigate) {
+      // go to 作業チェックリスト
+      onNavigate("master-checklist");
+    } else {
+      alert("チェックリスト画面に移動するナビゲーションが設定されていません。");
+    }
+  };
+
+  // loading state
   if (loading && !stats) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -217,7 +231,7 @@ export function Dashboard() {
     );
   }
 
-  // エラー表示
+  // initial load error
   if (error && !stats) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -232,7 +246,6 @@ export function Dashboard() {
   }
 
   if (!stats) {
-    // ここに来ることはほぼ無い想定だが、念のため
     return null;
   }
 
@@ -256,14 +269,16 @@ export function Dashboard() {
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-gray-900">おはようございます、[ユーザー名]さん</h2>
+            <h2 className="text-gray-900">
+              おはようございます、[ユーザー名]さん
+            </h2>
             <p className="text-sm text-gray-500 mt-1">{dateString}</p>
           </div>
         </div>
       </header>
 
       <div className="p-6 space-y-6">
-        {/* まだ完全にデータが無いときのガイド */}
+        {/* Empty data guide */}
         {isCompletelyEmpty && (
           <Card className="border-dashed border-gray-300 bg-white">
             <CardContent className="p-6 text-sm text-gray-600 space-y-2">
@@ -379,13 +394,17 @@ export function Dashboard() {
             <Button
               variant="outline"
               className="h-auto py-6 flex-col gap-2"
-              onClick={handleStartNewExecution}
+              onClick={handleStartNewExecutionClick}
               disabled={loading}
             >
               <Plus className="w-5 h-5" />
               <span className="text-sm">新規検査開始</span>
             </Button>
-            <Button variant="outline" className="h-auto py-6 flex-col gap-2">
+            <Button
+              variant="outline"
+              className="h-auto py-6 flex-col gap-2"
+              onClick={handleCreateChecklistClick}
+            >
               <CheckSquare className="w-5 h-5" />
               <span className="text-sm">チェックリスト作成</span>
             </Button>
@@ -441,8 +460,8 @@ export function Dashboard() {
           <CardContent>
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
-                合格 {qualityBreakdown.pass}件 / 要注意{" "}
-                {qualityBreakdown.warn}件 / 不合格 {qualityBreakdown.fail}件
+                合格 {qualityBreakdown.pass}件 / 要注意 {qualityBreakdown.warn}
+                件 / 不合格 {qualityBreakdown.fail}件
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                 <div className="p-4 bg-green-50 rounded-lg">
@@ -474,10 +493,8 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* 下部にエラー表示（データは表示できているが、何かの操作で失敗した場合） */}
-        {error && (
-          <p className="text-sm text-red-600 text-right">{error}</p>
-        )}
+        {/* bottom error (for operations after initial load) */}
+        {error && <p className="text-sm text-red-600 text-right">{error}</p>}
       </div>
     </div>
   );
