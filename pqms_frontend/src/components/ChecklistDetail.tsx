@@ -1,4 +1,3 @@
-// src/components/ChecklistDetail.tsx
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
@@ -55,7 +54,11 @@ const mapCheckItemTypeToLabel = (t: string | undefined): string => {
   }
 };
 
-export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailProps) {
+export function ChecklistDetail({
+  checklist,
+  onBack,
+  onSave,
+}: ChecklistDetailProps) {
   const [listName, setListName] = useState(checklist.name);
   const [description, setDescription] = useState<string>("");
   // store category as string id or null
@@ -65,7 +68,8 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
   const [checkItems, setCheckItems] = useState<CheckItemRow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
-  const [backendChecklist, setBackendChecklist] = useState<BackendChecklist | null>(null);
+  const [backendChecklist, setBackendChecklist] =
+    useState<BackendChecklist | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,8 +83,15 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
       try {
         const [checklistRes, categoriesRes] = await Promise.all([
           api.get<BackendChecklist>(`/checklists/${checklist.id}/`),
-          api.get<{ count?: number; results?: Category[] }>("/categories/"),
+          api.get<{ count?: number; results?: Category[] } | Category[]>(
+            "/categories/"
+          ),
         ]);
+
+        console.log("ChecklistDetail fetched:", {
+          checklist: checklistRes.data,
+          categories: categoriesRes.data,
+        });
 
         const bc = checklistRes.data;
         setBackendChecklist(bc);
@@ -92,10 +103,7 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
         if (bc.category) {
           if (typeof bc.category === "number") {
             setCategoryId(String(bc.category));
-          } else if (
-            typeof bc.category === "object" &&
-            "id" in bc.category
-          ) {
+          } else if (typeof bc.category === "object" && "id" in bc.category) {
             setCategoryId(String((bc.category as any).id));
           } else {
             setCategoryId(null);
@@ -104,13 +112,19 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
           setCategoryId(null);
         }
 
-        // categories list
-        const cats: Category[] = categoriesRes.data.results ?? (categoriesRes.data as any) ?? [];
+        // categories list - normalize to array
+        const catData = categoriesRes.data as any;
+        const cats: Category[] = Array.isArray(catData)
+          ? catData
+          : Array.isArray(catData.results)
+          ? catData.results
+          : [];
         setCategories(cats);
 
-        // checklist items (bc.items)
-        const items: BackendChecklistItem[] =
-          (bc as any).items ?? []; // depends on ChecklistSerializer
+        // checklist items - normalize to array
+        const items: BackendChecklistItem[] = Array.isArray((bc as any).items)
+          ? ((bc as any).items as BackendChecklistItem[])
+          : [];
 
         const rows: CheckItemRow[] = items.map((ci) => {
           let name = `項目 #${ci.check_item}`;
@@ -161,7 +175,9 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
   // ここではまだバックエンド連携せずに無効化しています。
   const handleAddItem = () => {
     // ここでモーダルを開いて既存 CheckItem 選択 → /checklist-items/ POST などに拡張可能
-    setError("チェック項目の追加は、別画面（チェック項目マスタ）で行ってください。");
+    setError(
+      "チェック項目の追加は、別画面（チェック項目マスタ）で行ってください。"
+    );
   };
 
   const handleSave = async () => {
@@ -376,10 +392,7 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
               {/* Mobile Cards */}
               <div className="md:hidden space-y-3">
                 {checkItems.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="border rounded-lg p-4 bg-white"
-                  >
+                  <div key={item.id} className="border rounded-lg p-4 bg-white">
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-500">
@@ -403,9 +416,7 @@ export function ChecklistDetail({ checklist, onBack, onSave }: ChecklistDetailPr
                     <div className="flex gap-4 text-sm">
                       <div>
                         <span className="text-gray-500">タイプ: </span>
-                        <span className="text-gray-900">
-                          {item.typeLabel}
-                        </span>
+                        <span className="text-gray-900">{item.typeLabel}</span>
                       </div>
                       <div>
                         <span className="text-gray-500">必須: </span>
