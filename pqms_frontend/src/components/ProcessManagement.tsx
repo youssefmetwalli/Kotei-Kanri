@@ -29,7 +29,7 @@ import { api } from "../lib/api";
 import type { ProcessSheet as BackendProcessSheet } from "../types/backend";
 
 const ITEM_TYPE = "PROCESS_CARD";
-
+const [createOpen, setCreateOpen] = useState(false);
 type KanbanStatus = "計画中" | "実行準備中" | "実行中" | "完了";
 
 interface ProcessSheetCard {
@@ -342,6 +342,7 @@ export function ProcessManagement() {
       };
 
       setProcessSheets((prev) => [...prev, newCard]);
+      setCreateOpen(false);
       // reset form
       setNewProductName("");
       setNewLotNumber("");
@@ -390,7 +391,7 @@ export function ProcessManagement() {
                 <Filter className="w-4 h-4 mr-2" />
                 フィルタ
               </Button>
-              <Dialog>
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
                 <DialogTrigger asChild>
                   <Button>
                     <Plus className="w-4 h-4 mr-2" />
