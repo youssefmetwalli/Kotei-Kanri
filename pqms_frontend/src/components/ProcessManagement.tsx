@@ -29,7 +29,6 @@ import { api } from "../lib/api";
 import type { ProcessSheet as BackendProcessSheet } from "../types/backend";
 
 const ITEM_TYPE = "PROCESS_CARD";
-const [createOpen, setCreateOpen] = useState(false);
 type KanbanStatus = "計画中" | "実行準備中" | "実行中" | "完了";
 
 interface ProcessSheetCard {
@@ -49,7 +48,11 @@ interface DraggableCardProps {
   onCardClick: (sheet: ProcessSheetCard) => void;
 }
 
-function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) {
+function DraggableCard({
+  sheet,
+  statusColor,
+  onCardClick,
+}: DraggableCardProps) {
   const [{ isDragging }, drag] = useDrag({
     type: ITEM_TYPE,
     item: { id: sheet.id, status: sheet.status },
@@ -59,10 +62,7 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
   });
 
   return (
-    <div
-      ref={(el) => drag(el)}
-      style={{ opacity: isDragging ? 0.5 : 1 }}
-    >
+    <div ref={(el) => drag(el)} style={{ opacity: isDragging ? 0.5 : 1 }}>
       <Card
         className={`${statusColor} border-2 hover:shadow-lg transition-shadow cursor-pointer`}
         onClick={(e) => {
@@ -93,9 +93,7 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-gray-600">進捗</span>
-                <span className="text-xs text-gray-900">
-                  {sheet.progress}%
-                </span>
+                <span className="text-xs text-gray-900">{sheet.progress}%</span>
               </div>
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div
@@ -105,14 +103,6 @@ function DraggableCard({ sheet, statusColor, onCardClick }: DraggableCardProps) 
               </div>
             </div>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
-            + 新規追加
-          </Button>
         </CardContent>
       </Card>
     </div>
@@ -217,6 +207,7 @@ export function ProcessManagement() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [createOpen, setCreateOpen] = useState(false);
   // new sheet form
   const [newProductName, setNewProductName] = useState("");
   const [newLotNumber, setNewLotNumber] = useState("");
@@ -410,9 +401,7 @@ export function ProcessManagement() {
                           id="product-name"
                           placeholder="例: 製品A"
                           value={newProductName}
-                          onChange={(e) =>
-                            setNewProductName(e.target.value)
-                          }
+                          onChange={(e) => setNewProductName(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
@@ -421,9 +410,7 @@ export function ProcessManagement() {
                           id="lot-number"
                           placeholder="例: LOT-A1"
                           value={newLotNumber}
-                          onChange={(e) =>
-                            setNewLotNumber(e.target.value)
-                          }
+                          onChange={(e) => setNewLotNumber(e.target.value)}
                         />
                       </div>
                     </div>
@@ -434,9 +421,7 @@ export function ProcessManagement() {
                           id="assignee"
                           placeholder="例: 田中太郎"
                           value={newAssignee}
-                          onChange={(e) =>
-                            setNewAssignee(e.target.value)
-                          }
+                          onChange={(e) => setNewAssignee(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
@@ -445,9 +430,7 @@ export function ProcessManagement() {
                           id="inspector"
                           placeholder="例: 佐藤花子"
                           value={newInspector}
-                          onChange={(e) =>
-                            setNewInspector(e.target.value)
-                          }
+                          onChange={(e) => setNewInspector(e.target.value)}
                         />
                       </div>
                     </div>
@@ -457,9 +440,7 @@ export function ProcessManagement() {
                         id="deadline"
                         type="date"
                         value={newDeadline}
-                        onChange={(e) =>
-                          setNewDeadline(e.target.value)
-                        }
+                        onChange={(e) => setNewDeadline(e.target.value)}
                       />
                     </div>
                     <Button className="w-full" onClick={handleCreateSheet}>
@@ -517,9 +498,7 @@ export function ProcessManagement() {
               工程シートを読み込み中です...
             </p>
           )}
-          {error && (
-            <p className="text-sm text-red-600 mb-2">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-600 mb-2">{error}</p>}
 
           {/* Kanban Board */}
           {viewMode === "kanban" && (
@@ -584,9 +563,7 @@ export function ProcessManagement() {
                             {sheet.lotNumber}
                           </td>
                           <td className="px-4 py-3">
-                            <Badge variant="secondary">
-                              {sheet.status}
-                            </Badge>
+                            <Badge variant="secondary">{sheet.status}</Badge>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900">
                             {sheet.assignee}
