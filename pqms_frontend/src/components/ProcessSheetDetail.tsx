@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Textarea } from "./ui/textarea";
-import { ArrowLeft, Plus, Play } from "lucide-react";
+import { ArrowLeft, Plus, Play, Trash2 } from "lucide-react";
 import { ExecutionPreparation } from "./ExecutionPreparation";
 import { api } from "../lib/api";
 import type { ProcessSheet, Execution } from "../types/backend";
@@ -35,6 +35,7 @@ interface ProcessSheetDetailProps {
     status: string;
   };
   onBack: () => void;
+  onDeleted?: () => void; 
 }
 
 interface ExecutionHistoryRow {
@@ -101,7 +102,11 @@ const formatDateTime = (iso: string | null | undefined) => {
   return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
 };
 
-export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
+export function ProcessSheetDetail({
+  sheet,
+  onBack,
+  onDeleted,
+}: ProcessSheetDetailProps) {
   const [showExecutionPrep, setShowExecutionPrep] = useState(false);
 
   const [backendSheet, setBackendSheet] = useState<ProcessSheet | null>(null);
@@ -112,6 +117,7 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
@@ -311,6 +317,30 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!backendSheet) return;
+    const ok = window.confirm(
+      "この工程シートを削除しますか？この操作は取り消せません。"
+    );
+    if (!ok) return;
+
+    try {
+      setDeleting(true);
+      setError(null);
+      await api.delete(`/process-sheets/${backendSheet.id}/`);
+      if (onDeleted) {
+        onDeleted();
+      } else {
+        onBack();
+      }
+    } catch (err) {
+      console.error(err);
+      setError("工程シートの削除に失敗しました。");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Build the sheet props for ExecutionPreparation from latest backend/local data
   const executionSheetProps = backendSheet
     ? {
@@ -340,19 +370,31 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            戻る
-          </Button>
-          <div>
-            <h2 className="text-gray-900">工程チェックシート詳細</h2>
-            {backendSheet && (
-              <p className="text-xs text-gray-500 mt-1">
-                ID: {backendSheet.id} / ステータス: {backendSheet.status}
-              </p>
-            )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              戻る
+            </Button>
+            <div>
+              <h2 className="text-gray-900">工程チェックシート詳細</h2>
+              {backendSheet && (
+                <p className="text-xs text-gray-500 mt-1">
+                  ID: {backendSheet.id} / ステータス: {backendSheet.status}
+                </p>
+              )}
+            </div>
           </div>
+
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={!backendSheet || deleting}
+          >
+            <Trash2 className="w-4 h-4 mr-1" />
+            {deleting ? "削除中..." : "削除"}
+          </Button>
         </div>
       </header>
 
@@ -646,13 +688,20 @@ export function ProcessSheetDetail({ sheet, onBack }: ProcessSheetDetailProps) {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-3 justify-end">
-            <Button variant="outline" onClick={onBack}>
+            <Button variant="outline" onClick={onBack} disabled={deleting}>
               キャンセル
             </Button>
-            <Button variant="outline" onClick={handleSave} disabled={saving}>
+            <Button
+              variant="outline"
+              onClick={handleSave}
+              disabled={saving || deleting}
+            >
               {saving ? "保存中..." : "保存"}
             </Button>
-            <Button onClick={() => setShowExecutionPrep(true)}>
+            <Button
+              onClick={() => setShowExecutionPrep(true)}
+              disabled={deleting}
+            >
               <Play className="w-4 h-4 mr-2" />
               実行開始
             </Button>
