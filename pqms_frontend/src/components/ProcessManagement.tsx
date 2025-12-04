@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Card, CardContent } from "./ui/card";
@@ -337,54 +338,38 @@ export function ProcessManagement() {
     }
   };
 
-  // Export simple CSV report of current process sheets
+  // Export formatted Excel file (.xlsx)
   const handleExportReport = () => {
     try {
-      const headers = [
-        "ID",
-        "製品名",
-        "ロット番号",
-        "ステータス",
-        "担当者",
-        "検査員",
-        "進捗(%)",
-        "期限",
+      const data = processSheets.map((sheet) => ({
+        ID: sheet.id,
+        "製品名": sheet.productName,
+        "ロット番号": sheet.lotNumber,
+        "ステータス": sheet.status,
+        "担当者": sheet.assignee,
+        "検査員": sheet.inspector,
+        "進捗(%)": sheet.progress,
+        "期限": sheet.deadline,
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+
+      worksheet["!cols"] = [
+        { wch: 5 },  // ID
+        { wch: 25 }, // 製品名 (Product Name) - Wider
+        { wch: 15 }, // ロット番号 (Lot Number)
+        { wch: 12 }, // ステータス (Status)
+        { wch: 15 }, // 担当者 (Assignee)
+        { wch: 15 }, // 検査員 (Inspector)
+        { wch: 10 }, // 進捗 (Progress)
+        { wch: 15 }, // 期限 (Deadline) - Wide enough to prevent ######
       ];
 
-      const rows = processSheets.map((sheet) => [
-        sheet.id,
-        sheet.productName,
-        sheet.lotNumber,
-        sheet.status,
-        sheet.assignee,
-        sheet.inspector,
-        sheet.progress,
-        sheet.deadline,
-      ]);
-
-      const csvContent = [headers, ...rows]
-        .map((row) =>
-          row
-            .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
-            .join(",")
-        )
-        .join("\n");
-
-      // 🔥 KEY FIX: Add UTF-8 BOM so Excel reads Japanese correctly
-      const BOM = "\uFEFF";
-
-      const blob = new Blob([BOM + csvContent], {
-        type: "text/csv;charset=utf-8;",
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "process_sheets_report.csv";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // 4. Create a Workbook and append the sheet
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "工程シート一覧");
+      XLSX.writeFile(workbook, "process_sheets_report.xlsx");
+      
     } catch (err) {
       console.error(err);
       setError("レポート出力に失敗しました。");
