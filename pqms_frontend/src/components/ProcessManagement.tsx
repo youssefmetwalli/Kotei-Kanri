@@ -295,6 +295,101 @@ export function ProcessManagement() {
       setError("ステータス更新に失敗しました。");
     }
   };
+  // Create a sheet from a simple template
+  const handleCreateFromTemplate = async () => {
+    try {
+      setError(null);
+
+      const payload: Partial<BackendProcessSheet> & { project_name: string } = {
+        name: "テンプレート工程シート",
+        project_name: "テンプレート製品",
+        assignee: "未設定",
+        planned_end: null,
+        priority: 2,
+        status: "planning",
+        notes: "テンプレートから作成された工程シートです。",
+        lot_number: "",
+        inspector: "",
+        progress: 0,
+      };
+
+      const res = await api.post<BackendProcessSheet>(
+        "/process-sheets/",
+        payload
+      );
+      const ps = res.data;
+
+      const newCard: ProcessSheetCard = {
+        id: ps.id,
+        productName: ps.project_name || ps.name || "未設定",
+        lotNumber: ps.lot_number || "-",
+        assignee: ps.assignee || "未設定",
+        inspector: ps.inspector || "-",
+        progress: ps.progress ?? 0,
+        deadline: ps.planned_end ? ps.planned_end.slice(0, 10) : "",
+        status: backendToKanbanStatus(ps.status),
+      };
+
+      setProcessSheets((prev) => [...prev, newCard]);
+    } catch (err) {
+      console.error(err);
+      setError("テンプレートからの作成に失敗しました。");
+    }
+  };
+
+  // Export simple CSV report of current process sheets
+  const handleExportReport = () => {
+    try {
+      const headers = [
+        "ID",
+        "製品名",
+        "ロット番号",
+        "ステータス",
+        "担当者",
+        "検査員",
+        "進捗(%)",
+        "期限",
+      ];
+
+      const rows = processSheets.map((sheet) => [
+        sheet.id,
+        sheet.productName,
+        sheet.lotNumber,
+        sheet.status,
+        sheet.assignee,
+        sheet.inspector,
+        sheet.progress,
+        sheet.deadline,
+      ]);
+
+      const csvContent = [headers, ...rows]
+        .map((row) =>
+          row
+            .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+            .join(",")
+        )
+        .join("\n");
+
+      // 🔥 KEY FIX: Add UTF-8 BOM so Excel reads Japanese correctly
+      const BOM = "\uFEFF";
+
+      const blob = new Blob([BOM + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "process_sheets_report.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      setError("レポート出力に失敗しました。");
+    }
+  };
 
   const handleCreateSheet = async () => {
     try {
@@ -351,6 +446,12 @@ export function ProcessManagement() {
       <ProcessSheetDetail
         sheet={selectedSheet}
         onBack={() => setSelectedSheet(null)}
+        onDeleted={() => {
+          setProcessSheets((prev) =>
+            prev.filter((ps) => ps.id !== selectedSheet.id)
+          );
+          setSelectedSheet(null);
+        }}
       />
     );
   }
@@ -453,11 +554,19 @@ export function ProcessManagement() {
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCreateFromTemplate}
+                >
                   <FileText className="w-4 h-4 mr-2" />
                   テンプレートから作成
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportReport}
+                >
                   <BarChart3 className="w-4 h-4 mr-2" />
                   レポート出力
                 </Button>
