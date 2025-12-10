@@ -209,7 +209,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const handleStartNewExecutionClick = async () => {
     await handleStartNewExecution();
     // go to the "実行" tab
-    onNavigate?.("quality");
+    onNavigate?.("process");
   };
 
   // navigate to checklist screen
