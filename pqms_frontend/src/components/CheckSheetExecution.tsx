@@ -1,4 +1,5 @@
 // src/components/CheckSheetExecution.tsx
+import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
@@ -283,25 +284,18 @@ export function CheckSheetExecution({
     setSaving(true);
     try {
       // Build payload for item_results_write
-      const itemsPayload = checkItems
-        .map((item) => {
-          const value = responses[item.id];
-          const note = comments[item.id] ?? "";
-          const hasPhoto = photos[item.id] && photos[item.id].length > 0;
+      // -> ALWAYS one entry per checklist item (default SKIP if empty)
+      const itemsPayload = checkItems.map((item) => {
+        const value = responses[item.id];
+        const note = comments[item.id] ?? "";
 
-          // no data at all for this item -> skip
-          if (value === undefined && note === "" && !hasPhoto) {
-            return null;
-          }
-
-          return {
-            checklist_item_id: item.checklistItemId,
-            value: value != null ? String(value) : "",
-            note,
-            status: inferItemStatus(item, value),
-          };
-        })
-        .filter((x): x is NonNullable<typeof x> => x !== null);
+        return {
+          checklist_item_id: item.checklistItemId,
+          value: value != null ? String(value) : "",
+          note,
+          status: inferItemStatus(item, value),
+        };
+      });
 
       // PATCH execution with nested item_results_write (ExecutionSerializer)
       const execRes = await api.patch(`/executions/${execution.id}/`, {
@@ -315,9 +309,14 @@ export function CheckSheetExecution({
       const itemResultMap: Record<number, number> = {};
       if (Array.isArray(updatedExec.item_results)) {
         updatedExec.item_results.forEach(
-          (ir: { id: number; checklist_item: { id: number } }) => {
-            if (ir.checklist_item && typeof ir.checklist_item.id === "number") {
-              itemResultMap[ir.checklist_item.id] = ir.id;
+          (ir: { id: number; checklist_item: number | { id: number } }) => {
+            const ci = ir.checklist_item;
+            const key =
+              typeof ci === "number" ? ci : ci && typeof ci.id === "number"
+              ? ci.id
+              : undefined;
+            if (typeof key === "number") {
+              itemResultMap[key] = ir.id;
             }
           }
         );
@@ -326,10 +325,12 @@ export function CheckSheetExecution({
       // Upload photos (if backend ExecutionPhotoSerializer accepts item_result)
       for (const item of checkItems) {
         const ciId = item.checklistItemId;
+        const itemPhotos = photos[item.id] || [];
+        if (itemPhotos.length === 0) continue;
+
         const itemResultId = itemResultMap[ciId];
         if (!itemResultId) continue;
 
-        const itemPhotos = photos[item.id] || [];
         for (const base64 of itemPhotos) {
           const formData = new FormData();
           formData.append("item_result", String(itemResultId));
@@ -374,10 +375,11 @@ export function CheckSheetExecution({
   // ------------------------------
   // Result confirmation screen
   // ------------------------------
-  if (showResultConfirmation) {
+  if (showResultConfirmation && execution) {
     return (
       <ExecutionResultConfirmation
         sheet={sheet}
+        executionId={execution.id}
         onBack={() => setShowResultConfirmation(false)}
         onConfirm={onComplete}
         onEditItem={handleEditItem}
