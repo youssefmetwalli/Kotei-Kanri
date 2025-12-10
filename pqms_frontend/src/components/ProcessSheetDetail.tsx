@@ -13,8 +13,9 @@ import {
 import { Textarea } from "./ui/textarea";
 import { ArrowLeft, Plus, Play, Trash2 } from "lucide-react";
 import { ExecutionPreparation } from "./ExecutionPreparation";
+import { ChecklistSelectDialog } from "./ChecklistSelectDialog";
 import { api } from "../lib/api";
-import type { ProcessSheet, Execution } from "../types/backend";
+import type { ProcessSheet, Execution, Checklist } from "../types/backend";
 
 interface ChecklistItemRow {
   id: number;
@@ -35,7 +36,7 @@ interface ProcessSheetDetailProps {
     status: string;
   };
   onBack: () => void;
-  onDeleted?: () => void; 
+  onDeleted?: () => void;
 }
 
 interface ExecutionHistoryRow {
@@ -45,6 +46,23 @@ interface ExecutionHistoryRow {
   resultLabel: "合格" | "不合格" | "要注意";
   statusLabel: "完了" | "承認待ち" | "差戻し";
   executor: string;
+}
+
+type MaybePaginated<T> =
+  | {
+      results: T[];
+      count?: number;
+      next?: string | null;
+      previous?: string | null;
+    }
+  | T[];
+
+function normalizeListResponse<T>(data: MaybePaginated<T>): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray((data as any).results)) {
+    return (data as any).results as T[];
+  }
+  return [];
 }
 
 const mapPriorityNumberToLabel = (p?: number | null): "高" | "中" | "低" => {
@@ -121,6 +139,10 @@ export function ProcessSheetDetail({
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
+  // dialog state
+  const [checklistDialogOpen, setChecklistDialogOpen] = useState(false);
+  const [linkingChecklist, setLinkingChecklist] = useState(false);
+
   const [sheetData, setSheetData] = useState({
     name: `${sheet.productName} 初期ロット検査`,
     description: `${sheet.productName}の初期ロット品質検査`,
@@ -171,15 +193,14 @@ export function ProcessSheetDetail({
       }));
 
       // Execution history for this process sheet
-      const execRes = await api.get<{
-        count?: number;
-        results?: Execution[];
-      }>("/executions/", {
-        params: { process_sheet: sheet.id },
-      });
+      const execRes = await api.get<MaybePaginated<Execution>>(
+        "/executions/",
+        {
+          params: { process_sheet: sheet.id },
+        }
+      );
 
-      const executions: Execution[] =
-        execRes.data.results ?? (execRes.data as any) ?? [];
+      const executions = normalizeListResponse(execRes.data);
 
       const historyRows: ExecutionHistoryRow[] = executions.map((e) => {
         const { date, time } = formatDateTime(
@@ -244,10 +265,10 @@ export function ProcessSheetDetail({
           0;
 
         const checklistRow: ChecklistItemRow = {
-          id: ps.checklist.id,
-          name: ps.checklist.name,
+          id: (ps.checklist as any).id,
+          name: (ps.checklist as any).name,
           itemCount,
-          estimatedTime: "-", // no field in backend; can be extended later
+          estimatedTime: "-", // no field in backend; placeholder
           status: checklistStatus,
         };
         setChecklists([checklistRow]);
@@ -298,7 +319,6 @@ export function ProcessSheetDetail({
         notes: sheetData.description,
         lot_number: sheetData.lotNumber,
         inspector: sheetData.inspector,
-        // keep existing progress as-is; could also be edited if you add a UI
         progress: backendSheet.progress,
       };
 
@@ -341,6 +361,28 @@ export function ProcessSheetDetail({
     }
   };
 
+  // チェックリスト紐付け
+  const handleAttachChecklist = async (cl: Checklist) => {
+    if (!backendSheet) return;
+    try {
+      setLinkingChecklist(true);
+      setError(null);
+      // backend serializer should accept checklist_id for write
+      await api.patch<ProcessSheet>(`/process-sheets/${backendSheet.id}/`, {
+        checklist_id: cl.id,
+      });
+      setChecklistDialogOpen(false);
+      setSaveMessage("チェックリストを紐付けました。");
+      setTimeout(() => setSaveMessage(null), 2000);
+      await fetchDetail();
+    } catch (err) {
+      console.error(err);
+      setError("チェックリストの紐付けに失敗しました。");
+    } finally {
+      setLinkingChecklist(false);
+    }
+  };
+
   // Build the sheet props for ExecutionPreparation from latest backend/local data
   const executionSheetProps = backendSheet
     ? {
@@ -355,6 +397,8 @@ export function ProcessSheetDetail({
         lotNumber: sheetData.lotNumber,
         assignee: sheetData.assignee,
       };
+
+  const hasChecklist = !!backendSheet?.checklist;
 
   if (showExecutionPrep) {
     return (
@@ -561,9 +605,16 @@ export function ProcessSheetDetail({
                 <CardTitle>
                   作業チェックリスト ({checklists.length}つ)
                 </CardTitle>
-                <Button variant="outline" size="sm" disabled>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setChecklistDialogOpen(true)}
+                  disabled={!backendSheet || linkingChecklist}
+                >
                   <Plus className="w-4 h-4 mr-2" />
-                  作業チェックリストを追加
+                  {linkingChecklist
+                    ? "紐付け中..."
+                    : "作業チェックリストを追加"}
                 </Button>
               </div>
             </CardHeader>
@@ -700,7 +751,12 @@ export function ProcessSheetDetail({
             </Button>
             <Button
               onClick={() => setShowExecutionPrep(true)}
-              disabled={deleting}
+              disabled={deleting || !hasChecklist}
+              title={
+                hasChecklist
+                  ? ""
+                  : "チェックリストが紐づいていません。作業チェックリストを追加してください。"
+              }
             >
               <Play className="w-4 h-4 mr-2" />
               実行開始
@@ -708,6 +764,13 @@ export function ProcessSheetDetail({
           </div>
         </div>
       </div>
+
+      {/* Checklist select dialog */}
+      <ChecklistSelectDialog
+        open={checklistDialogOpen}
+        onOpenChange={setChecklistDialogOpen}
+        onSelect={handleAttachChecklist}
+      />
     </div>
   );
 }
