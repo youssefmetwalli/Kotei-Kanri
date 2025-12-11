@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Textarea } from "./ui/textarea";
-import { ArrowLeft, Plus, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Play, Trash2, TrendingUp } from "lucide-react";
 import { ExecutionPreparation } from "./ExecutionPreparation";
 import { ChecklistSelectDialog } from "./ChecklistSelectDialog";
 import { api } from "../lib/api";
@@ -37,6 +37,7 @@ interface ProcessSheetDetailProps {
   };
   onBack: () => void;
   onDeleted?: () => void;
+  onTrackProgress?: (processSheetId: number) => void;
 }
 
 interface ExecutionHistoryRow {
@@ -124,6 +125,7 @@ export function ProcessSheetDetail({
   sheet,
   onBack,
   onDeleted,
+  onTrackProgress,
 }: ProcessSheetDetailProps) {
   const [showExecutionPrep, setShowExecutionPrep] = useState(false);
 
@@ -150,7 +152,7 @@ export function ProcessSheetDetail({
     lotNumber: sheet.lotNumber,
     assignee: sheet.assignee,
     inspector: sheet.inspector,
-    deadline: sheet.deadline, // yyyy-mm-dd
+    deadline: sheet.deadline,
     priority: "高" as "高" | "中" | "低",
   });
 
@@ -165,20 +167,17 @@ export function ProcessSheetDetail({
     }
   };
 
-  // ---- Load ProcessSheet detail + execution history from backend ----
   const fetchDetail = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // ProcessSheet detail
       const sheetRes = await api.get<ProcessSheet>(
         `/process-sheets/${sheet.id}/`
       );
       const ps = sheetRes.data;
       setBackendSheet(ps);
 
-      const deadlineDate =
-        ps.planned_end?.slice(0, 10) || sheet.deadline || "";
+      const deadlineDate = ps.planned_end?.slice(0, 10) || sheet.deadline || "";
 
       setSheetData((prev) => ({
         ...prev,
@@ -192,13 +191,9 @@ export function ProcessSheetDetail({
         priority: mapPriorityNumberToLabel(ps.priority),
       }));
 
-      // Execution history for this process sheet
-      const execRes = await api.get<MaybePaginated<Execution>>(
-        "/executions/",
-        {
-          params: { process_sheet: sheet.id },
-        }
-      );
+      const execRes = await api.get<MaybePaginated<Execution>>("/executions/", {
+        params: { process_sheet: sheet.id },
+      });
 
       const executions = normalizeListResponse(execRes.data);
 
@@ -230,7 +225,6 @@ export function ProcessSheetDetail({
 
       setExecutionHistory(historyRows);
 
-      // Derive checklist status from latest execution
       let checklistStatus: ChecklistItemRow["status"] = "未実行";
 
       if (executions.length > 0) {
@@ -257,7 +251,6 @@ export function ProcessSheetDetail({
         }
       }
 
-      // Checklist (if any) with status derived from executions
       if (ps.checklist) {
         const itemCount =
           (ps.checklist as any).items?.length ??
@@ -268,7 +261,7 @@ export function ProcessSheetDetail({
           id: (ps.checklist as any).id,
           name: (ps.checklist as any).name,
           itemCount,
-          estimatedTime: "-", // no field in backend; placeholder
+          estimatedTime: "-",
           status: checklistStatus,
         };
         setChecklists([checklistRow]);
@@ -295,7 +288,6 @@ export function ProcessSheetDetail({
   }, [fetchDetail]);
 
   const handleStartExecution = async () => {
-    // 実行完了後：準備画面を閉じて最新情報を取得
     setShowExecutionPrep(false);
     await fetchDetail();
   };
@@ -361,13 +353,11 @@ export function ProcessSheetDetail({
     }
   };
 
-  // チェックリスト紐付け
   const handleAttachChecklist = async (cl: Checklist) => {
     if (!backendSheet) return;
     try {
       setLinkingChecklist(true);
       setError(null);
-      // backend serializer should accept checklist_id for write
       await api.patch<ProcessSheet>(`/process-sheets/${backendSheet.id}/`, {
         checklist_id: cl.id,
       });
@@ -383,7 +373,6 @@ export function ProcessSheetDetail({
     }
   };
 
-  // Build the sheet props for ExecutionPreparation from latest backend/local data
   const executionSheetProps = backendSheet
     ? {
         id: backendSheet.id,
@@ -430,15 +419,30 @@ export function ProcessSheetDetail({
             </div>
           </div>
 
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleDelete}
-            disabled={!backendSheet || deleting}
-          >
-            <Trash2 className="w-4 h-4 mr-1" />
-            {deleting ? "削除中..." : "削除"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              size="sm"
+              onClick={() => {
+                if (onTrackProgress && backendSheet) {
+                  onTrackProgress(backendSheet.id);
+                }
+              }}
+              disabled={!backendSheet}
+            >
+              <TrendingUp className="w-4 h-4 mr-2" />
+              進捗確認
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={!backendSheet || deleting}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              {deleting ? "削除中..." : "削除"}
+            </Button>
+          </div>
         </div>
       </header>
 
