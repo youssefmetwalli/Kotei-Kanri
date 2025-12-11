@@ -43,6 +43,11 @@ interface ProcessSheetCard {
   status: KanbanStatus;
 }
 
+// ⭐ ADD: Props interface
+interface ProcessManagementProps {
+  onTrackProcess?: (processId: number) => void;
+}
+
 interface DraggableCardProps {
   sheet: ProcessSheetCard;
   statusColor: string;
@@ -199,7 +204,8 @@ const kanbanToBackendStatus = (
   }
 };
 
-export function ProcessManagement() {
+// ⭐ UPDATE: Add props parameter
+export function ProcessManagement({ onTrackProcess }: ProcessManagementProps) {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [selectedSheet, setSelectedSheet] = useState<ProcessSheetCard | null>(
     null
@@ -296,6 +302,7 @@ export function ProcessManagement() {
       setError("ステータス更新に失敗しました。");
     }
   };
+  
   // Create a sheet from a simple template
   const handleCreateFromTemplate = async () => {
     try {
@@ -437,6 +444,7 @@ export function ProcessManagement() {
           );
           setSelectedSheet(null);
         }}
+        onTrackProgress={onTrackProcess}
       />
     );
   }
